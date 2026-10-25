@@ -1,0 +1,35 @@
+# Mondschein – Datendateien
+
+Offline-Daten für die Android-App **Mondschein** (wo sind Mond- und Sonnenauf- bzw. -untergang über
+dem Gelände sichtbar?). Gebiet: Nördliche Kalkalpen von den Ammergauer Alpen bis Berchtesgaden,
+mit Inntal, Nordkette und Alpenvorland bis München.
+
+Die Dateien liegen als **Releases** vor; `daten.json` im neuesten Release listet Name, Größe und
+SHA-256-Prüfsumme jeder Datei. Die App lädt daraus nur, was sich geändert hat.
+
+| Datei | Inhalt |
+|---|---|
+| `mondschein.pmtiles` | Grundkarte (Vektorkacheln) |
+| `mondschein-wandern.pmtiles` | Wander-Ebene: Wege mit Schwierigkeit, Routen, Hütten, Gipfel |
+| `mondschein-hoehen.bin` | Höhenmodell: Kern 1/3″ (ca. 10 m), Horizontpuffer 3″ (ca. 90 m) |
+| `mondschein-schummerung.pmtiles` | Schräglicht-Schummerung |
+| `mondschein-hoehenlinien.pmtiles` | Höhenlinien |
+
+## Quellen und Lizenzen
+
+Die Dateien sind aus den folgenden Quellen **abgeleitet und verändert** (zugeschnitten, umprojiziert,
+gemittelt bzw. maximiert, in Kacheln umgewandelt):
+
+- **Kartendaten:** © OpenStreetMap-Mitwirkende, Lizenz [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/) –
+  [openstreetmap.org/copyright](https://www.openstreetmap.org/copyright). Kartenkacheln der Grundkarte erzeugt mit
+  [Protomaps](https://protomaps.com). Die Kartendateien (`*.pmtiles` außer Schummerung und Höhenlinien) stehen
+  als abgeleitete Datenbank ebenfalls unter der ODbL.
+- **Höhendaten Österreich:** Datenquelle BEV – Bundesamt für Eich- und Vermessungswesen, ALS DTM (1 m),
+  Lizenz [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de), verändert.
+- **Höhendaten Bayern:** Bayerische Vermessungsverwaltung – [www.geodaten.bayern.de](https://www.geodaten.bayern.de),
+  DGM1, Lizenz [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de), verändert.
+- **Copernicus DEM GLO-30:** © DLR e.V. 2010–2014 und © Airbus Defence and Space GmbH 2014–2018, bereitgestellt
+  im Rahmen von COPERNICUS durch die Europäische Union und die ESA.
+
+Höhenmodell, Schummerung und Höhenlinien dürfen unter denselben Bedingungen weiterverwendet werden
+(Namensnennung der genannten Quellen, Hinweis auf Veränderung).
