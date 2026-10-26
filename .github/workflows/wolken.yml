@@ -1,0 +1,70 @@
+# Wolkendatei aus ICON-D2 aufbereiten und als Release „wolken“ veröffentlichen (Mondschein, Meilenstein 14).
+# Läuft ca. 2 h nach jedem DWD-Lauf (00, 03, …, 21 UTC); öffentliches Repo: Actions-Minuten kostenlos.
+name: Wolken aufbereiten
+
+on:
+  schedule:
+    - cron: "20 2-23/3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wolken
+  cancel-in-progress: false
+
+jobs:
+  wolken:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhängigkeiten
+        run: pip install -r wetter/requirements.txt
+
+      - name: Neuester Lauf schon veröffentlicht?
+        id: pruefen
+        run: |
+          neu=$(python wetter/icon_d2.py --nur-lauf)
+          alt=$(gh release download wolken --pattern wolken.json --output - 2>/dev/null \
+                | python -c "import json,sys; print(json.load(sys.stdin)['lauf'])" 2>/dev/null || true)
+          echo "Neuester Lauf: $neu, veröffentlicht: ${alt:-keiner}"
+          echo "lauf=$neu" >> "$GITHUB_OUTPUT"
+          if [ "$neu" = "$alt" ]; then echo "fertig=ja" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Aufbereiten
+        if: steps.pruefen.outputs.fertig != 'ja'
+        run: python -W ignore wetter/icon_d2.py --lauf "${{ steps.pruefen.outputs.lauf }}" --ziel mondschein-wolken.bin --json wolken.json
+
+      - name: Veröffentlichen
+        if: steps.pruefen.outputs.fertig != 'ja'
+        run: |
+          if ! gh release view wolken > /dev/null 2>&1; then
+            gh release create wolken --title "Wolken (ICON-D2, laufend aktualisiert)" --prerelease --latest=false \
+              --notes "Wird alle 3 Stunden ersetzt. Daten: Deutscher Wetterdienst, CC BY 4.0, verändert."
+          fi
+          # Erst die Datei, dann die Beschreibung: wolken.json zeigt nie auf eine fehlende Datei
+          gh release upload wolken mondschein-wolken.bin --clobber
+          gh release upload wolken wolken.json --clobber
+
+      # GitHub schaltet geplante Läufe nach 60 Tagen ohne Änderung am Repo ab
+      - name: Wach halten
+        run: |
+          if [ $(( $(date +%s) - $(git log -1 --format=%ct) )) -gt $(( 50 * 86400 )) ]; then
+            date -u +%FT%TZ > wetter/.wach
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add wetter/.wach
+            git commit -m "Wach halten (geplante Läufe)"
+            git push
+          fi
