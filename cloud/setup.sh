@@ -3,6 +3,8 @@
 #
 # Läuft als Setup-Skript der Cloud-Umgebung (als root, Ubuntu 24.04, vor dem Start von Claude) und
 # wird danach als Abbild zwischengespeichert, solange es unter ca. 5 Minuten bleibt. Installiert:
+#   - JDK 25 (Ubuntu-Paket; Gradle verlangt es in gradle/gradle-daemon-jvm.properties und würde es sonst
+#     über api.foojay.io laden, das im Cloud-Netz gesperrt ist)
 #   - Android-SDK (Kommandozeilen-Werkzeuge, Plattform 37, Build-Tools 36) nach /opt/android-sdk
 #   - Datendateien aus den Releases von lh1000/Mondschein-Daten nach /opt/mondschein/Daten
 #     (dieselbe Ordnerstruktur wie Mondschein/Daten am PC; die Tests mit echten Daten laufen dann mit)
@@ -19,6 +21,12 @@ SDK=/opt/android-sdk
 DATEN=/opt/mondschein/Daten
 WERKZEUGE=commandlinetools-linux-16111833_latest.zip
 RELEASES=https://github.com/lh1000/Mondschein-Daten/releases
+
+jdk() {
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-25-jdk-headless > /dev/null
+    echo "JDK fertig"
+}
 
 android_sdk() {
     if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
@@ -66,13 +74,16 @@ python_pakete() {
 }
 
 mkdir -p /opt/mondschein
+jdk &
 android_sdk &
 daten &
 python_pakete &
 wait
 
 # Umgebung für jede Shell der Sitzung (Gradle findet das SDK, die Tests die Daten)
+# UTF-8, sonst scheitert der Kotlin-Compiler an Testnamen mit Umlauten und Gedankenstrich
 cat > /etc/profile.d/mondschein.sh <<EOF
+export LANG=C.UTF-8
 export ANDROID_HOME=$SDK
 export ANDROID_SDK_ROOT=$SDK
 export MONDSCHEIN_DATEN=$DATEN
