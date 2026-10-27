@@ -1,0 +1,52 @@
+# Wegenetz für die Wanderplanung neu erzeugen und als Datenstand veröffentlichen (Mondschein, Meilenstein 15).
+# Monatlich und auf Knopfdruck; öffentliches Repo: Actions-Minuten kostenlos, Läufer mit 16 GB Speicher.
+name: Wegenetz aufbereiten
+
+on:
+  schedule:
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daten
+  cancel-in-progress: false
+
+jobs:
+  wege:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhängigkeiten
+        run: pip install -r wege/requirements.txt
+
+      - name: OSM-Extrakte und Höhenmodell laden
+        run: |
+          mkdir -p osm daten
+          curl -fsSL -o osm/oberbayern-latest.osm.pbf https://download.geofabrik.de/europe/germany/bayern/oberbayern-latest.osm.pbf &
+          curl -fsSL -o osm/austria-latest.osm.pbf https://download.geofabrik.de/europe/austria-latest.osm.pbf &
+          url=$(curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/daten.json \
+                | python -c "import json,sys; print(next(d['url'] for d in json.load(sys.stdin)['dateien'] if d['name']=='mondschein-hoehen.bin'))")
+          curl -fsSL -o hoehen.bin "$url" &
+          wait
+          ls -la osm hoehen.bin
+
+      - name: Wegenetz erzeugen
+        run: |
+          python wege/wegenetz.py --pbf osm/oberbayern-latest.osm.pbf osm/austria-latest.osm.pbf \
+            --hoehen hoehen.bin --ausgabe daten/mondschein-wege.bin --stand "$(date -u +%F)"
+
+      - name: Veröffentlichen
+        run: python wege/veroeffentlichen.py --daten daten --stand "$(date -u +%F)"
