@@ -11,6 +11,9 @@ Kartendaten © OpenStreetMap-Mitwirkende, ODbL 1.0.
 Aufruf (Python-Umgebung aus tools/hoehen, siehe README):
     python wegenetz.py --pbf oberbayern-latest.osm.pbf austria-latest.osm.pbf
                        --hoehen ..\\..\\..\\Daten\\mondschein-hoehen.bin --ausgabe ..\\..\\..\\Daten\\mondschein-wege.bin
+Für eine Region der Gebietserweiterung (Meilenstein 29) mit Höhenkacheln und ca. 25 km Rand:
+    python wegenetz.py --pbf … --hoehen mondschein-hoehen-N47E009.bin … --gebiet 46.55,48.15,9.25,10.95
+                       --ausgabe mondschein-wege-allgaeu-vorarlberg.bin
 Für die Testdatei in core (kleiner Ausschnitt am Wendelstein):
     python wegenetz.py … --gebiet 47.665,47.71,11.99,12.04 --ausgabe ..\\..\\core\\src\\test\\resources\\wege-wendelstein.bin
 """
@@ -290,8 +293,10 @@ class Sammler(osmium.SimpleHandler):
 class Hoehen:
     """Wie `Hoehenmodell` in core: feinste Ebene, die den Punkt mit allen vier Nachbarn abdeckt, bilinear."""
 
-    def __init__(self, pfad: Path):
-        self.ebenen = hm.lies(pfad)
+    def __init__(self, pfade: Path | list[Path]):
+        # Mehrere Dateien (Höhenkacheln der Regionen): alle Ebenen, feinste zuerst
+        pfade = [pfade] if isinstance(pfade, Path) else pfade
+        self.ebenen = sorted((e for p in pfade for e in hm.lies(p)), key=lambda e: e.schritt_bogensek)
 
     def abtasten(self, b: np.ndarray, l: np.ndarray) -> np.ndarray:
         ergebnis = np.full(b.shape, np.nan)
@@ -447,7 +452,7 @@ def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--pbf", type=Path, nargs="+", required=True)
-    p.add_argument("--hoehen", type=Path, required=True)
+    p.add_argument("--hoehen", type=Path, nargs="+", required=True)
     p.add_argument("--ausgabe", type=Path, required=True)
     p.add_argument("--gebiet", help="süd,nord,west,ost in Grad (Standard: Kerngebiet)")
     p.add_argument("--stand", default=None, help="Datenstand JJJJ-MM-TT (Standard: Datum der ersten PBF)")

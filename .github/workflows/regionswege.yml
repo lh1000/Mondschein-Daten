@@ -1,0 +1,103 @@
+# Wegenetz und Wald einer Region erzeugen und veröffentlichen (Mondschein, Gebietserweiterung E4).
+# Region plus ca. 25 km Rand, damit Touren über die Regionsgrenze gehen. Nur auf Knopfdruck; braucht die
+# Höhenkacheln der Region und den Horizontpuffer im Datenstand („Höhen aufbereiten“).
+name: Wege und Wald je Region
+
+on:
+  workflow_dispatch:
+    inputs:
+      regionen:
+        description: "Regionen (IDs aus gebiete/gebiete.json), mit Leerzeichen getrennt"
+        default: "allgaeu-vorarlberg"
+      veroeffentlichen:
+        description: "Als Datenstand veröffentlichen (sonst nur als Artefakte)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      regionen: ${{ steps.liste.outputs.regionen }}
+    steps:
+      - id: liste
+        env:
+          REGIONEN: ${{ inputs.regionen }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, re, sys
+          r = os.environ["REGIONEN"].split()
+          if not r or not all(re.fullmatch(r"[a-z0-9-]+", x) for x in r) or "kern" in r:
+              sys.exit(f"Ungültige Regionen: {r}")
+          print("regionen=" + json.dumps(r))
+          PY
+
+  region:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        region: ${{ fromJSON(needs.plan.outputs.regionen) }}
+    env:
+      REGION: ${{ matrix.region }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: pip install -r wege/requirements.txt
+      - name: OSM-Extrakte und Höhen laden
+        run: |
+          mkdir -p osm hoehen-kacheln daten
+          python3 karte/region.py osm "$REGION" | while read -r url; do curl -fsSL --retry 3 -o "osm/$(basename "$url")" "$url"; done
+          python3 karte/region.py hoehen "$REGION" puffer | while read -r url; do curl -fsSL -o "hoehen-kacheln/$(basename "$url")" "$url"; done
+          ls -la osm hoehen-kacheln
+      - name: Wegenetz
+        run: |
+          python wege/wegenetz.py --pbf osm/*.osm.pbf --hoehen hoehen-kacheln/*.bin \
+            --gebiet "$(python3 karte/region.py sued-nord "$REGION" 0.25)" \
+            --ausgabe "daten/mondschein-wege-$REGION.bin" --stand "$(date -u +%F)"
+      - name: Wald
+        run: |
+          rm -rf osm hoehen-kacheln
+          python wald/wald.py --wege "daten/mondschein-wege-$REGION.bin" --ausgabe "daten/mondschein-wald-$REGION.bin" \
+            --gebiet "$(python3 karte/region.py sued-nord "$REGION" 0.25)" --zwischenspeicher chm --stand "$(date -u +%F)"
+          ls -la daten
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wege-${{ matrix.region }}
+          path: daten/*.bin
+          retention-days: 5
+          compression-level: 1
+
+  veroeffentlichen:
+    needs: region
+    if: ${{ !cancelled() && inputs.veroeffentlichen }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: daten
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wege-*
+          path: daten
+          merge-multiple: true
+      - name: Veröffentlichen
+        run: |
+          ls -la daten
+          python3 wege/veroeffentlichen.py --daten daten --stand "$(date -u +%F)"
