@@ -108,6 +108,41 @@ STANDARDNAME = {PARKPLATZ: "Parkplatz", HALTESTELLE: "Haltestelle", BAHNHOF: "Ba
                 SEILBAHN: "Bergbahnstation"}
 
 
+# Orte mit Aussicht (Byte, muss zu core `Ortsart` passen; Meilenstein 18b)
+GIPFEL, SATTEL, AUSSICHT, ORT_HUETTE = range(4)
+ORTSNAME = {GIPFEL: "Gipfel", SATTEL: "Sattel", AUSSICHT: "Aussichtspunkt", ORT_HUETTE: "Hütte"}
+HOEHE_UNBEKANNT = -2**31
+
+
+def ortsart(tags) -> int | None:
+    """Gipfel und Sättel nur mit Namen (sonst zu viele), Aussichtspunkte und Hütten immer."""
+    name = tags.get("name")
+    if tags.get("natural") in ("peak", "volcano") and name:
+        return GIPFEL
+    if (tags.get("natural") == "saddle" or tags.get("mountain_pass") == "yes") and name:
+        return SATTEL
+    if tags.get("tourism") == "viewpoint":
+        return AUSSICHT
+    if tags.get("tourism") in ("alpine_hut", "wilderness_hut"):
+        return ORT_HUETTE
+    return None
+
+
+def ele(tags) -> float | None:
+    """OSM-Höhe (`ele`, z. B. „1884“, „1884 m“, „1884,5“) in Metern, sonst None."""
+    roh = (tags.get("ele") or "").replace(",", ".").strip()
+    zahl = ""
+    for z in roh:
+        if z.isdigit() or z in ".-":
+            zahl += z
+        else:
+            break
+    try:
+        return float(zahl)
+    except ValueError:
+        return None
+
+
 def ist_bahnhalt(tags) -> bool:
     """Halt einer Bahn (Bahnhof, Haltepunkt, Bahnsteig) – nicht Bushaltestelle."""
     if tags.get("highway") == "bus_stop" or tags.get("bus") == "yes":
@@ -133,11 +168,16 @@ class Sammler(osmium.SimpleHandler):
         # Startpunkte: Breite, Länge, Art, Name, Bahnhalt (für die Prüfung auf Bergbahnen)
         self.starts: dict[tuple[str, int], tuple[float, float, int, str, bool]] = {}
         self.bergbahn: list[np.ndarray] = []  # Punkte (Breite, Länge) von Zahnrad- und Standseilbahnen
+        # Orte mit Aussicht: Breite, Länge, Art, Name, OSM-Höhe (oder None)
+        self.orte: dict[tuple[str, int], tuple[float, float, int, str, float | None]] = {}
 
     def innen(self, b: float, l: float) -> bool:
         return self.g.sued <= b <= self.g.nord and self.g.west <= l <= self.g.ost
 
     def node(self, n):
+        ort = ortsart(n.tags)
+        if ort is not None and n.location.valid() and self.innen(n.location.lat, n.location.lon):
+            self.orte[("n", n.id)] = (n.location.lat, n.location.lon, ort, n.tags.get("name", ""), ele(n.tags))
         art = startart(n.tags)
         if art is None or not n.location.valid() or not self.innen(n.location.lat, n.location.lon):
             return
@@ -151,6 +191,17 @@ class Sammler(osmium.SimpleHandler):
                 pass
             return
         art = begehbar(w.tags)
+        ort = ortsart(w.tags) if art is None else None
+        if ort is not None:  # Hütte oder Aussichtspunkt als Fläche: Mittelpunkt
+            try:
+                punkte = [(n.lat, n.lon) for n in w.nodes]
+            except osmium.InvalidLocationError:
+                punkte = []
+            if punkte:
+                b0 = sum(p[0] for p in punkte) / len(punkte)
+                l0 = sum(p[1] for p in punkte) / len(punkte)
+                if self.innen(b0, l0):
+                    self.orte[("w", w.id)] = (b0, l0, ort, w.tags.get("name", ""), ele(w.tags))
         start = startart(w.tags) if art is None else None
         if art is None and start is None:
             return
@@ -392,10 +443,24 @@ def main() -> int:
     for b, l, art, name, osm in starts:
         start_bytes += struct.pack("<iiiiB3x", halb(b * MIKRO), halb(l * MIKRO), index[osm], name_index(name), art)
 
+    # Orte mit Aussicht (Meilenstein 18b): Abschnitt nach den Namen, im Kopf ab Byte 36 angekündigt;
+    # ältere Leser überspringen ihn
+    orte_bytes = bytearray()
+    for b, l, art, name, hoehe in sammler.orte.values():
+        z = HOEHE_UNBEKANNT if hoehe is None else halb(hoehe * 10)
+        orte_bytes += struct.pack("<iiiiB3x", halb(b * MIKRO), halb(l * MIKRO), z, name_index(name or ORTSNAME[art]), art)
+    orte_anzahl = len(sammler.orte)
+    print(f"  {orte_anzahl} Orte mit Aussicht")
+
     stand = a.stand or dt.date.fromtimestamp(a.pbf[0].stat().st_mtime).isoformat()
     n = len(graph_ids)
-    kopf = struct.pack("<8siiiiiii", MAGIC, VERSION, n, m, geo_anzahl, len(starts), len(namen_bytes),
-                       int(stand.replace("-", "")))
+    def ausgerichtet(laenge: int) -> int:
+        return laenge + (-laenge % 4)
+
+    orte_ab = KOPF + 12 * n + ausgerichtet(len(kanten)) + ausgerichtet(len(geometrie)) + ausgerichtet(len(start_bytes)) \
+        + ausgerichtet(len(namen_bytes))
+    kopf = struct.pack("<8siiiiiiiii", MAGIC, VERSION, n, m, geo_anzahl, len(starts), len(namen_bytes),
+                       int(stand.replace("-", "")), orte_anzahl, orte_ab)
     kopf += bytes(KOPF - len(kopf))
     knoten = np.zeros(n, dtype=[("b", "<i4"), ("l", "<i4"), ("z", "<i4")])
     knoten["b"] = np.floor(kb * MIKRO + 0.5)
@@ -404,11 +469,12 @@ def main() -> int:
     a.ausgabe.parent.mkdir(parents=True, exist_ok=True)
     teil = a.ausgabe.with_name(a.ausgabe.name + ".teil")
     with open(teil, "wb") as f:
-        for teilstueck in (kopf, knoten.tobytes(), kanten, geometrie, start_bytes, namen_bytes):
+        for teilstueck in (kopf, knoten.tobytes(), kanten, geometrie, start_bytes, namen_bytes, orte_bytes):
             f.write(teilstueck)
             f.write(bytes(-len(teilstueck) % 4))  # 4-Byte-Grenzen
     teil.replace(a.ausgabe)
     print(f"{a.ausgabe}: {n} Knoten, {m} Kanten, {geo_anzahl} Geometriepunkte, {len(starts)} Startpunkte, "
+          f"{orte_anzahl} Orte, "
           f"{a.ausgabe.stat().st_size / 1e6:.1f} MB, Stand {stand} ({time.time() - beginn:.0f} s)")
     return 0
 
