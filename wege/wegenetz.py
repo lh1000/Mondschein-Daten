@@ -30,6 +30,8 @@ from pathlib import Path
 import numpy as np
 import osmium
 from scipy.ndimage import map_coordinates
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hoehen"))
@@ -86,6 +88,48 @@ def begehbar(tags) -> int | None:
     if tags.get("access") in ("no", "private") and tags.get("foot") not in FUSS_JA:
         return None
     return art
+
+
+# Zufahrt mit dem Auto (Meilenstein 19a): Straßen, auf denen private Autos fahren dürfen
+AUTO_STRASSEN = {"motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link", "secondary",
+                 "secondary_link", "tertiary", "tertiary_link", "unclassified", "residential", "living_street",
+                 "service", "road"}
+# Gesperrt für private Autos; „destination“ (nur Anlieger) zählt als gesperrt (Entscheidung des Nutzers)
+AUTO_GESPERRT = {"no", "private", "agricultural", "forestry", "destination", "delivery", "permit", "emergency",
+                 "military", "customers"}
+AUTO_PUFFER = 0.3  # Grad: das Straßennetz reicht so weit über das Gebiet hinaus
+ZUFAHRT_NAH = 80.0  # Meter: Autostraßen so nah am Parkplatz zählen als seine Zufahrt
+ZUFAHRT_FERN = 300.0  # Meter: keine freie Autostraße so nah → keine Zufahrt
+# Bits im Startpunkt (Byte 17)
+KEINE_ZUFAHRT, MAUT, ZEITWEISE = 1, 2, 4
+
+
+def autofrei(tags) -> bool | None:
+    """True: private Autos dürfen fahren; False: gesperrt; None: keine Straße. Forstwege (`track`)
+    sind ohne ausdrückliche Freigabe gesperrt (in Bayern und Tirol die Regel). Die genaueste Angabe
+    gilt: motorcar vor motor_vehicle vor vehicle vor access."""
+    h = tags.get("highway")
+    if h not in AUTO_STRASSEN and h != "track":
+        return None
+    if h == "service" and tags.get("service") == "parking_aisle":
+        return None
+    for schluessel in ("motorcar", "motor_vehicle", "vehicle", "access"):
+        wert = tags.get(schluessel)
+        if wert is not None:
+            return wert.split(";")[0].strip() not in AUTO_GESPERRT
+    return h != "track"
+
+
+def maut(tags) -> bool:
+    return tags.get("toll") == "yes" or tags.get("toll:motorcar") == "yes"
+
+
+def zeitweise_gesperrt(tags) -> bool:
+    """Zeitweise Sperre (z. B. „no @ (Nov–Apr)“); ausgewertet wird nur, dass es eine gibt."""
+    return any(wert.split("@")[0].strip() in AUTO_GESPERRT
+               for schluessel in ("motorcar:conditional", "motor_vehicle:conditional", "vehicle:conditional",
+                                  "access:conditional")
+               if (wert := tags.get(schluessel)))
 
 
 def startart(tags) -> int | None:
@@ -168,6 +212,8 @@ class Sammler(osmium.SimpleHandler):
         # Startpunkte: Breite, Länge, Art, Name, Bahnhalt (für die Prüfung auf Bergbahnen)
         self.starts: dict[tuple[str, int], tuple[float, float, int, str, bool]] = {}
         self.bergbahn: list[np.ndarray] = []  # Punkte (Breite, Länge) von Zahnrad- und Standseilbahnen
+        # Autostraßen: Knoten-IDs, Breite, Länge, frei, Maut, zeitweise gesperrt
+        self.auto: list[tuple[np.ndarray, np.ndarray, np.ndarray, bool, bool, bool]] = []
         # Orte mit Aussicht: Breite, Länge, Art, Name, OSM-Höhe (oder None)
         self.orte: dict[tuple[str, int], tuple[float, float, int, str, float | None]] = {}
 
@@ -183,7 +229,21 @@ class Sammler(osmium.SimpleHandler):
             return
         self.starts[("n", n.id)] = (n.location.lat, n.location.lon, art, n.tags.get("name", ""), ist_bahnhalt(n.tags))
 
+    def auto_innen(self, b: np.ndarray, l: np.ndarray) -> bool:
+        return bool(((b >= self.g.sued - AUTO_PUFFER) & (b <= self.g.nord + AUTO_PUFFER) &
+                     (l >= self.g.west - AUTO_PUFFER) & (l <= self.g.ost + AUTO_PUFFER)).any())
+
     def way(self, w):
+        frei = autofrei(w.tags)
+        if frei is not None:
+            try:
+                ids = np.fromiter((n.ref for n in w.nodes), dtype=np.int64)
+                b = np.fromiter((n.lat for n in w.nodes), dtype=np.float64)
+                l = np.fromiter((n.lon for n in w.nodes), dtype=np.float64)
+            except osmium.InvalidLocationError:
+                ids = np.zeros(0, dtype=np.int64)
+            if len(ids) >= 2 and self.auto_innen(b, l):
+                self.auto.append((ids, b, l, frei, maut(w.tags), zeitweise_gesperrt(w.tags)))
         if ist_bergbahn(w.tags):
             try:
                 self.bergbahn.append(np.array([(n.lat, n.lon) for n in w.nodes], dtype=np.float64))
@@ -267,6 +327,65 @@ def meter(b1, l1, b2, l2) -> np.ndarray:
     p1, p2 = np.radians(b1), np.radians(b2)
     h = np.sin((p2 - p1) / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(np.radians(l2 - l1) / 2) ** 2
     return 2 * ERDRADIUS * np.arcsin(np.sqrt(h))
+
+
+def zufahrten(sammler: Sammler, cos0: float) -> dict[tuple[str, int], int]:
+    """Zufahrt je Parkplatz (Meilenstein 19a, tools/wege/README.md): Ist er über Straßen, auf denen
+    private Autos fahren dürfen, mit dem großen öffentlichen Netz verbunden? Dazu Maut und zeitweise
+    Sperren auf allen solchen Zufahrten. Ergebnis: Bits KEINE_ZUFAHRT, MAUT, ZEITWEISE."""
+    freie = [s for s in sammler.auto if s[3]]
+    if not freie:
+        return {}
+    ids = np.concatenate([s[0] for s in freie])
+    b = np.concatenate([s[1] for s in freie])
+    l = np.concatenate([s[2] for s in freie])
+    knoten, erste, idx = np.unique(ids, return_index=True, return_inverse=True)
+    kb, kl = b[erste], l[erste]
+
+    def netz(ohne_maut: bool, ohne_zeitweise: bool) -> np.ndarray:
+        """Kennzeichnet je Knoten, ob er zum größten Netzteil gehört."""
+        von, nach = [], []
+        start = 0
+        for s in freie:
+            n = len(s[0])
+            if not ((ohne_maut and s[4]) or (ohne_zeitweise and s[5])):
+                von.append(idx[start:start + n - 1])
+                nach.append(idx[start + 1:start + n])
+            start += n
+        a = np.concatenate(von) if von else np.zeros(0, dtype=np.int64)
+        z = np.concatenate(nach) if nach else np.zeros(0, dtype=np.int64)
+        graph = coo_matrix((np.ones(len(a), dtype=np.int8), (a, z)), shape=(len(knoten), len(knoten)))
+        _, teil = connected_components(graph, directed=False)
+        groesster = np.bincount(teil).argmax()
+        return teil == groesster
+
+    im_netz, ohne_maut, ohne_zeit = netz(False, False), netz(True, False), netz(False, True)
+    baum = cKDTree(np.column_stack([kb * 111_195.0, kl * 111_195.0 * cos0]))
+    ergebnis: dict[tuple[str, int], int] = {}
+    gesperrt = maut_n = zeit_n = 0
+    for k, (pb, pl, art, _, _) in sammler.starts.items():
+        if art != PARKPLATZ:
+            continue
+        punkt = [pb * 111_195.0, pl * 111_195.0 * cos0]
+        nah = baum.query_ball_point(punkt, ZUFAHRT_NAH)
+        if not nah:
+            d, i = baum.query(punkt)
+            nah = [i] if d <= ZUFAHRT_FERN else []
+        if not any(im_netz[i] for i in nah):
+            ergebnis[k] = KEINE_ZUFAHRT
+            gesperrt += 1
+            continue
+        bits = 0
+        if not any(ohne_maut[i] for i in nah):
+            bits |= MAUT
+            maut_n += 1
+        if not any(ohne_zeit[i] for i in nah):
+            bits |= ZEITWEISE
+            zeit_n += 1
+        ergebnis[k] = bits
+    print(f"  Zufahrt: {len(knoten)} Knoten im Autonetz; Parkplätze ohne Zufahrt {gesperrt}, "
+          f"nur über Maut {maut_n}, zeitweise gesperrt {zeit_n}")
+    return ergebnis
 
 
 def verdichten(punkte: np.ndarray, schritt: float) -> np.ndarray:
@@ -362,11 +481,13 @@ def main() -> int:
                     bergbahnhalte += 1
         print(f"  {bergbahnhalte} Halte an Zahnrad- und Standseilbahnen")
 
+    zufahrt = zufahrten(sammler, cos0)
+
     starts = []
-    for (b, l, art, name, _) in sammler.starts.values():
+    for k, (b, l, art, name, _) in sammler.starts.items():
         d, i = baum.query([b * 111_195.0, l * 111_195.0 * cos0])
         if d <= FANG:
-            starts.append((b, l, art, name or STANDARDNAME[art], int(alle_ids[i])))
+            starts.append((b, l, art, name or STANDARDNAME[art], int(alle_ids[i]), zufahrt.get(k, 0)))
     print(f"  {len(starts)} Startpunkte am Wegenetz")
 
     # Graphknoten: Wegenden, Kreuzungen (Knoten mehrfach benutzt), Startpunkte
@@ -440,8 +561,9 @@ def main() -> int:
             print(f"  Wege {nr}/{len(wege)}, {m} Kanten ({time.time() - beginn:.0f} s)", flush=True)
 
     start_bytes = bytearray()
-    for b, l, art, name, osm in starts:
-        start_bytes += struct.pack("<iiiiB3x", halb(b * MIKRO), halb(l * MIKRO), index[osm], name_index(name), art)
+    for b, l, art, name, osm, flaggen in starts:
+        start_bytes += struct.pack("<iiiiBB2x", halb(b * MIKRO), halb(l * MIKRO), index[osm], name_index(name), art,
+                                   flaggen)
 
     # Orte mit Aussicht (Meilenstein 18b): Abschnitt nach den Namen, im Kopf ab Byte 36 angekündigt;
     # ältere Leser überspringen ihn
