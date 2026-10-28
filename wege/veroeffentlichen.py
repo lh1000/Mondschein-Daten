@@ -40,6 +40,10 @@ DATEIEN = {
     "mondschein-wege.bin": "Wegenetz (OpenStreetMap)",
     "mondschein-wald.bin": "Wald am Weg (Meta/WRI CHMv2, Copernicus)",
 }
+# Ladbare Gebiete (Gebietserweiterung E1, notizen/recherche/gebietserweiterung.md). Die Dateien oben
+# gehören zum Kerngebiet; Dateien ohne Region (leere Liste) wären Grunddaten, die jede App lädt.
+REGIONEN = [{"id": "kern", "name": "Kerngebiet (Werdenfels bis Berchtesgaden)"}]
+REGION_DER_DATEI = {name: ["kern"] for name in DATEIEN}
 # Dürfen fehlen, auch wenn sie noch nie veröffentlicht wurden (eigener Workflow im Daten-Repo)
 OPTIONAL = {"mondschein-wald.bin"}
 LISTE = f"https://github.com/{REPO}/releases/latest/download/daten.json"
@@ -72,7 +76,7 @@ def main() -> int:
     args = parser.parse_args()
 
     tag = f"daten-{args.stand}"
-    liste = {"stand": args.stand, "dateien": []}
+    liste = {"stand": args.stand, "regionen": REGIONEN, "dateien": []}
     alt = bisherige()
     neu: list[str] = []
     for name, beschreibung in DATEIEN.items():
@@ -83,7 +87,7 @@ def main() -> int:
                 continue
             if name not in alt:
                 raise SystemExit(f"{pfad} fehlt und ist noch nie veröffentlicht worden")
-            liste["dateien"].append(alt[name])
+            liste["dateien"].append({**alt[name], "regionen": REGION_DER_DATEI[name]})
             print(f"  {name}: nicht im Ordner – bisheriger Eintrag bleibt")
             continue
         print(f"  {name}: Prüfsumme …", end="", flush=True)
@@ -95,7 +99,7 @@ def main() -> int:
             url = f"https://github.com/{REPO}/releases/download/{tag}/{name}"
             neu.append(name)
         eintrag = {"name": name, "beschreibung": beschreibung, "groesse": pfad.stat().st_size,
-                   "sha256": summe, "url": url}
+                   "sha256": summe, "url": url, "regionen": REGION_DER_DATEI[name]}
         liste["dateien"].append(eintrag)
         print(f" {eintrag['groesse'] / 1e6:.0f} MB" + (" – neu" if name in neu else " – unverändert"))
     ausgabe = args.daten / "daten.json"
