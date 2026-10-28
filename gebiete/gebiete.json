@@ -1,5 +1,5 @@
 {
- "_hinweis": "Regionen der Gebietserweiterung (docs/konzept.md Stufe 5, notizen/recherche/gebietserweiterung.md). Grenzen in Grad. Das Rechteck einer Region ist ihr Kern; Daten wie Wegenetz und Wald bekommen ca. 25 km Überlappung. Weitere Regionen kommen in E6 dazu. osm: Geofabrik-Pfade der Extrakte, die die Region samt Rand abdecken.",
+ "_hinweis": "Regionen der Gebietserweiterung (docs/konzept.md Stufe 5, notizen/recherche/gebietserweiterung.md). Grenzen in Grad. Das Rechteck einer Region ist ihr Kern; Daten wie Wegenetz und Wald bekommen ca. 25 km Überlappung. osm: Geofabrik-Pfade der Extrakte, die die Region samt Rand abdecken.",
  "gesamt": {
   "sued": 46.7,
   "nord": 50.6,
@@ -34,6 +34,207 @@
     "europe/austria",
     "europe/liechtenstein",
     "europe/switzerland"
+   ]
+  },
+  {
+   "id": "tirol",
+   "name": "Tirol bis zum Alpenhauptkamm",
+   "sued": 46.7,
+   "nord": 47.25,
+   "west": 10.7,
+   "ost": 12.2,
+   "osm": [
+    "europe/austria",
+    "europe/italy/nord-est"
+   ]
+  },
+  {
+   "id": "pinzgau-tauern",
+   "name": "Pinzgau und Hohe Tauern",
+   "sued": 46.9,
+   "nord": 47.25,
+   "west": 12.2,
+   "ost": 13.15,
+   "osm": [
+    "europe/austria"
+   ]
+  },
+  {
+   "id": "salzkammergut",
+   "name": "Salzburg und Salzkammergut",
+   "sued": 47.25,
+   "nord": 48.0,
+   "west": 13.15,
+   "ost": 14.0,
+   "osm": [
+    "europe/germany/bayern/oberbayern",
+    "europe/austria"
+   ]
+  },
+  {
+   "id": "ostschweiz",
+   "name": "Ostschweiz und Liechtenstein",
+   "sued": 46.8,
+   "nord": 47.5,
+   "west": 8.9,
+   "ost": 9.5,
+   "osm": [
+    "europe/switzerland",
+    "europe/liechtenstein",
+    "europe/austria"
+   ]
+  },
+  {
+   "id": "schwarzwald-elsass",
+   "name": "Schwarzwald und Elsass",
+   "sued": 47.5,
+   "nord": 48.9,
+   "west": 7.4,
+   "ost": 8.5,
+   "osm": [
+    "europe/germany/baden-wuerttemberg/freiburg-regbez",
+    "europe/germany/baden-wuerttemberg/karlsruhe-regbez",
+    "europe/france/alsace",
+    "europe/switzerland"
+   ]
+  },
+  {
+   "id": "bodensee-oberschwaben",
+   "name": "Bodensee und Oberschwaben",
+   "sued": 47.5,
+   "nord": 48.4,
+   "west": 8.5,
+   "ost": 9.5,
+   "osm": [
+    "europe/germany/baden-wuerttemberg/tuebingen-regbez",
+    "europe/germany/baden-wuerttemberg/freiburg-regbez",
+    "europe/switzerland"
+   ]
+  },
+  {
+   "id": "oberschwaben-iller",
+   "name": "Oberschwaben und Iller",
+   "sued": 47.9,
+   "nord": 48.4,
+   "west": 9.5,
+   "ost": 10.7,
+   "osm": [
+    "europe/germany/baden-wuerttemberg/tuebingen-regbez",
+    "europe/germany/bayern/schwaben"
+   ]
+  },
+  {
+   "id": "muenchen-voralpen",
+   "name": "München und Voralpenland",
+   "sued": 47.9,
+   "nord": 48.4,
+   "west": 10.7,
+   "ost": 13.15,
+   "osm": [
+    "europe/germany/bayern/oberbayern",
+    "europe/germany/bayern/schwaben",
+    "europe/germany/bayern/niederbayern"
+   ]
+  },
+  {
+   "id": "rhein-neckar",
+   "name": "Rhein-Neckar und Kraichgau",
+   "sued": 48.9,
+   "nord": 49.8,
+   "west": 7.8,
+   "ost": 8.5,
+   "osm": [
+    "europe/germany/baden-wuerttemberg/karlsruhe-regbez"
+   ]
+  },
+  {
+   "id": "stuttgart-alb",
+   "name": "Stuttgart und Schwäbische Alb",
+   "sued": 48.4,
+   "nord": 49.8,
+   "west": 8.5,
+   "ost": 10.2,
+   "osm": [
+    "europe/germany/baden-wuerttemberg/stuttgart-regbez",
+    "europe/germany/baden-wuerttemberg/tuebingen-regbez",
+    "europe/germany/baden-wuerttemberg/karlsruhe-regbez"
+   ]
+  },
+  {
+   "id": "schwaben-nord",
+   "name": "Augsburg und Ries",
+   "sued": 48.4,
+   "nord": 49.2,
+   "west": 10.2,
+   "ost": 11.5,
+   "osm": [
+    "europe/germany/bayern/schwaben",
+    "europe/germany/bayern/oberbayern",
+    "europe/germany/bayern/mittelfranken"
+   ]
+  },
+  {
+   "id": "donau-isar",
+   "name": "Donau und Isar",
+   "sued": 48.4,
+   "nord": 49.2,
+   "west": 11.5,
+   "ost": 13.0,
+   "osm": [
+    "europe/germany/bayern/oberbayern",
+    "europe/germany/bayern/niederbayern",
+    "europe/germany/bayern/oberpfalz"
+   ]
+  },
+  {
+   "id": "ostbayern",
+   "name": "Bayerischer Wald und Passau",
+   "sued": 48.0,
+   "nord": 49.5,
+   "west": 13.0,
+   "ost": 14.0,
+   "osm": [
+    "europe/germany/bayern/niederbayern",
+    "europe/germany/bayern/oberpfalz",
+    "europe/austria"
+   ]
+  },
+  {
+   "id": "franken-west",
+   "name": "Unterfranken und Main",
+   "sued": 49.8,
+   "nord": 50.6,
+   "west": 8.9,
+   "ost": 10.2,
+   "osm": [
+    "europe/germany/bayern/unterfranken",
+    "europe/germany/baden-wuerttemberg/stuttgart-regbez"
+   ]
+  },
+  {
+   "id": "franken",
+   "name": "Mittel- und Oberfranken",
+   "sued": 49.2,
+   "nord": 50.6,
+   "west": 10.2,
+   "ost": 12.2,
+   "osm": [
+    "europe/germany/bayern/mittelfranken",
+    "europe/germany/bayern/oberfranken",
+    "europe/germany/bayern/unterfranken",
+    "europe/germany/bayern/oberpfalz"
+   ]
+  },
+  {
+   "id": "oberpfalz",
+   "name": "Oberpfalz",
+   "sued": 49.2,
+   "nord": 50.4,
+   "west": 12.2,
+   "ost": 13.0,
+   "osm": [
+    "europe/germany/bayern/oberpfalz",
+    "europe/germany/bayern/oberfranken"
    ]
   }
  ]

@@ -1,12 +1,14 @@
 """Amtliche Laserscan-Geländemodelle (1 m) für das Höhenmodell der App.
 
-Quellen, beide Airborne Laserscanning, Lizenz CC BY 4.0:
+Quellen, alle Airborne Laserscanning (BEV und Bayern CC BY 4.0, swisstopo Open Data mit Quellenangabe):
 
 - Österreich: BEV ALS DTM, 50-km-Kacheln in EPSG:3035 als Cloud-Optimized GeoTIFF (COG). Ein COG
   enthält verkleinerte Übersichtsstufen und lässt sich blockweise per HTTP lesen – geladen wird nur
   der benötigte Ausschnitt in der benötigten Auflösung (Kern 2 m, Puffer 8 m).
 - Bayern: DGM1 der Bayerischen Vermessungsverwaltung, 1-km-Kacheln in EPSG:25832 (kein COG). Jede
   Kachel wird in den Arbeitsspeicher geladen, verrechnet und verworfen – es bleibt nichts liegen.
+- Schweiz und Liechtenstein: swissALTI3D 2 m (swisstopo), 1-km-Kacheln in EPSG:2056, Liste über die
+  STAC-Schnittstelle (Gebietserweiterung, Meilenstein 31).
 
 Umrechnung auf das geographische Zielraster: Jedes Quellpixel zählt in der Zielzelle, in der seine
 Mitte liegt. Je Zelle werden Summe und Anzahl der Pixel über alle Kacheln aufaddiert; Mittelwert =
@@ -18,6 +20,7 @@ Kacheln stehen in einer Liste und werden beim nächsten Lauf übersprungen.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import shutil
@@ -326,6 +329,60 @@ def bayern(summen: Summen, arbeitsordner: Path, parallel: int = 6) -> None:
                 rest = (gesamt - geladen) / max(rate, 1)
                 print(f"    {fertig}/{len(offen)} Kacheln, {geladen / 1e9:.1f} GB, "
                       f"{rate / 1e6:.1f} MB/s, noch ca. {rest / 60:.0f} min")
+
+
+# ---------------------------------------------------------------- Schweiz und Liechtenstein (swissALTI3D)
+
+CH_STAC = "https://data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo.swissalti3d/items"
+LV95 = CRS.from_epsg(2056)
+
+
+def schweiz_kacheln(gitter: Gitter) -> list[str]:
+    """Adressen der 2-m-Kacheln (1 km, COG) im Gebiet, je Kachel der neueste Stand (STAC, ohne Anmeldung)."""
+    w, s, o, n = gitter.grenzen()
+    url = f"{CH_STAC}?bbox={w},{s},{o},{n}&limit=100"
+    neueste: dict[str, tuple[str, str]] = {}
+    while url:
+        with urllib.request.urlopen(url, timeout=120) as antwort:
+            seite = json.load(antwort)
+        for f in seite["features"]:
+            m = re.match(r"swissalti3d_(\d{4})_(\d+-\d+)", f["id"])
+            href = next((a["href"] for a in f["assets"].values() if a["href"].endswith(".tif") and "_2_2056_" in a["href"]), None)
+            if m and href and (m[2] not in neueste or neueste[m[2]][0] < m[1]):
+                neueste[m[2]] = (m[1], href)
+        url = next((l["href"] for l in seite.get("links", []) if l.get("rel") == "next"), None)
+    return sorted(h for _, h in neueste.values())
+
+
+def lade_url(url: str) -> bytes:
+    for versuch in range(6):
+        try:
+            with urllib.request.urlopen(url, timeout=120) as antwort:
+                return antwort.read()
+        except (OSError, urllib.error.URLError):
+            time.sleep(2 * (versuch + 1))
+    raise RuntimeError(f"{url} ließ sich nicht laden")
+
+
+def schweiz(summen: Summen, parallel: int = 8) -> None:
+    """swissALTI3D 2 m (Schweiz und Liechtenstein, Open Data swisstopo) laden und aufaddieren."""
+    urls = schweiz_kacheln(summen.gitter)
+    offen = [u for u in urls if u not in summen.erledigt]
+    print(f"  Schweiz: {len(urls)} Kacheln im Gebiet, offen {len(offen)}")
+    zeit = time.time()
+    with ThreadPoolExecutor(parallel) as pool:
+        for start in range(0, len(offen), 8 * parallel):
+            teil = offen[start:start + 8 * parallel]
+            for url, daten in zip(teil, pool.map(lade_url, teil)):
+                with MemoryFile(daten) as speicher, speicher.open() as d:
+                    a = d.read(1)
+                    a[~np.isfinite(a) | (a < -1000)] = QUELL_LUECKE
+                    summen.addiere(a, d.transform, d.crs or LV95)
+                summen.fertig(url)
+            summen.sichern()
+            fertig = start + len(teil)
+            if fertig % 400 < 8 * parallel or fertig == len(offen):
+                print(f"    {fertig}/{len(offen)} Kacheln, {(time.time() - zeit) / 60:.0f} min")
 
 
 # ---------------------------------------------------------------- Ergebnis

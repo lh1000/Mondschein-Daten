@@ -4,9 +4,9 @@ Schreibt `mondschein-hoehen-N47E010.bin` im Format der Höhendatei (README.md) m
 
 - südlich von 48° N (Alpen und Voralpen) 1/3″ (ca. 10 m × 7 m), nördlich 1″ (Hügelland, Entscheidung
   des Nutzers vom 28.10.2026);
-- Mittelwert der amtlichen Laserscan-Modelle wie im Kerngebiet: BEV ALS DTM (Österreich) und
-  Bayern DGM1 (amtlich.py); was keine dieser Quellen abdeckt (vorerst Baden-Württemberg, Schweiz,
-  Liechtenstein, Elsass), füllt Copernicus GLO-30;
+- Mittelwert der amtlichen Laserscan-Modelle wie im Kerngebiet: BEV ALS DTM (Österreich), Bayern DGM1
+  und swissALTI3D (Schweiz, Liechtenstein; amtlich.py); was keine dieser Quellen abdeckt (vorerst
+  Baden-Württemberg und Elsass), füllt Copernicus GLO-30;
 - die Kachel reicht von Grad- zu Gradlinie einschließlich beider Ränder, Nachbarkacheln überlappen also
   um eine Zelle (sonst fiele die App an den Nähten auf den groben Puffer zurück); begrenzt auf das
   Gesamtgebiet in tools/gebiete/gebiete.json.
@@ -68,6 +68,7 @@ def kachel(name: str, ausgabe: Path, arbeitsordner: Path, cache: Path) -> None:
     summen = amtlich.Summen(arbeitsordner, name, gitter)
     amtlich.oesterreich(summen, aufloesung=2 if teilung == 3 else 8)
     amtlich.bayern(summen, arbeitsordner)
+    amtlich.schweiz(summen)
     hoehen = open_memmap(arbeitsordner / f"{name}_dm.npy", mode="w+", dtype=np.int16, shape=(gitter.zeilen, gitter.spalten))
     luecken = amtlich.mittelwert_in_bloecken(summen, hoehen, faktor)
     gesamt = gitter.zeilen * gitter.spalten
