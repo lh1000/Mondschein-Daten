@@ -8,6 +8,7 @@ import json
 import re
 import time
 import urllib.request
+from pathlib import Path
 
 AGENT = {"User-Agent": "Mondschein-Daten (github.com/lh1000/Mondschein-Daten)"}
 BYTES = 20 << 20
@@ -53,6 +54,10 @@ def main() -> None:
     pruefe("Protomaps Builds", "https://build-metadata.protomaps.dev/builds.json", 1 << 20)
     pruefe("Meta CHMv2 (S3)", "https://dataforgood-fb-data.s3.amazonaws.com/forests/v2/global/dinov3_global_chm_v2_ml3/chm/1202300212.tif")
     pruefe("DWD Open Data ICON-D2", "https://opendata.dwd.de/weather/nwp/icon-d2/grib/", 1 << 20)
+    # Alle Geofabrik-Extrakte der Regionen (nur der Anfang jeder Datei)
+    gebiete = json.loads((Path(__file__).resolve().parent.parent / "gebiete" / "gebiete.json").read_text(encoding="utf-8"))
+    for pfad in sorted({o for r in gebiete["regionen"] for o in r.get("osm", [])}):
+        pruefe(f"Geofabrik {pfad}", f"https://download.geofabrik.de/{pfad}-latest.osm.pbf", 1 << 16)
 
 
 if __name__ == "__main__":

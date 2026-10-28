@@ -1,11 +1,21 @@
 {
- "_hinweis": "Regionen der Gebietserweiterung (docs/konzept.md Stufe 5, notizen/recherche/gebietserweiterung.md). Grenzen in Grad. Das Rechteck einer Region ist ihr Kern; Daten wie Wegenetz und Wald bekommen ca. 25 km Überlappung. osm: Geofabrik-Pfade der Extrakte, die die Region samt Rand abdecken.",
- "gesamt": {
-  "sued": 46.7,
-  "nord": 50.6,
-  "west": 7.4,
-  "ost": 14.0
- },
+ "_hinweis": "Regionen der Gebietserweiterung (docs/konzept.md Stufe 5, notizen/recherche/gebietserweiterung.md). Grenzen in Grad. Das Rechteck einer Region ist ihr Kern; Daten wie Wegenetz und Wald bekommen ca. 25 km Überlappung. osm: Geofabrik-Pfade der Extrakte, die die Region samt Rand abdecken. gesamt: Liste der zusammenhängenden Gesamtgebiete (Höhenkacheln und Wolken werden darauf begrenzt).",
+ "gesamt": [
+  {
+   "sued": 46.7,
+   "nord": 50.6,
+   "west": 7.4,
+   "ost": 14.0,
+   "name": "Süddeutschland und Alpen"
+  },
+  {
+   "name": "Nordseeküste Amsterdam bis Bremerhaven",
+   "sued": 52.0,
+   "nord": 53.8,
+   "west": 4.4,
+   "ost": 9.0
+  }
+ ],
  "fein_bis": 48.0,
  "regionen": [
   {
@@ -235,6 +245,69 @@
    "osm": [
     "europe/germany/bayern/oberpfalz",
     "europe/germany/bayern/oberfranken"
+   ]
+  },
+  {
+   "id": "noord-holland",
+   "name": "Noord-Holland und Texel",
+   "sued": 52.2,
+   "nord": 53.2,
+   "west": 4.4,
+   "ost": 5.4,
+   "osm": [
+    "europe/netherlands/noord-holland",
+    "europe/netherlands/flevoland"
+   ]
+  },
+  {
+   "id": "friesland",
+   "name": "Friesland und Westfriesische Inseln",
+   "sued": 52.8,
+   "nord": 53.5,
+   "west": 5.1,
+   "ost": 6.3,
+   "osm": [
+    "europe/netherlands/friesland",
+    "europe/netherlands/noord-holland",
+    "europe/netherlands/groningen"
+   ]
+  },
+  {
+   "id": "groningen-drenthe",
+   "name": "Groningen und Drenthe",
+   "sued": 52.8,
+   "nord": 53.6,
+   "west": 6.3,
+   "ost": 7.2,
+   "osm": [
+    "europe/netherlands/groningen",
+    "europe/netherlands/drenthe",
+    "europe/netherlands/friesland",
+    "europe/germany/niedersachsen"
+   ]
+  },
+  {
+   "id": "ostfriesland",
+   "name": "Ostfriesland",
+   "sued": 52.9,
+   "nord": 53.8,
+   "west": 7.2,
+   "ost": 8.1,
+   "osm": [
+    "europe/germany/niedersachsen",
+    "europe/netherlands/groningen"
+   ]
+  },
+  {
+   "id": "jade-weser",
+   "name": "Jade, Weser und Bremerhaven",
+   "sued": 52.9,
+   "nord": 53.8,
+   "west": 8.1,
+   "ost": 9.0,
+   "osm": [
+    "europe/germany/niedersachsen",
+    "europe/germany/bremen"
    ]
   }
  ]

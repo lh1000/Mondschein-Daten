@@ -43,17 +43,24 @@ def gebiete(pfad: Path = GEBIETE) -> dict:
     return json.loads(pfad.read_text(encoding="utf-8"))
 
 
+def gesamtgebiete(g: dict) -> list[dict]:
+    return g["gesamt"] if isinstance(g["gesamt"], list) else [g["gesamt"]]
+
+
 def kachelgebiet(name: str, g: dict) -> tuple[hm.Gebiet, int]:
     """Gebiet der Kachel (auf das Gesamtgebiet begrenzt) und Teilung (3 = 1/3″, 1 = 1″)."""
     m = re.fullmatch(r"N(\d\d)E(\d\d\d)", name)
     if not m:
         raise SystemExit(f"Kachelname wie N47E010 erwartet, nicht {name}")
     breite, laenge = int(m[1]), int(m[2])
-    gesamt = g["gesamt"]
-    gebiet = hm.Gebiet(sued=max(breite, gesamt["sued"]), nord=min(breite + 1, gesamt["nord"]),
-                       west=max(laenge, gesamt["west"]), ost=min(laenge + 1, gesamt["ost"]))
-    if gebiet.sued >= gebiet.nord or gebiet.west >= gebiet.ost:
-        raise SystemExit(f"{name} liegt außerhalb des Gesamtgebiets")
+    # Mehrere Gesamtgebiete (Süddeutschland, Küste): das, das die Kachel schneidet
+    for gesamt in gesamtgebiete(g):
+        gebiet = hm.Gebiet(sued=max(breite, gesamt["sued"]), nord=min(breite + 1, gesamt["nord"]),
+                           west=max(laenge, gesamt["west"]), ost=min(laenge + 1, gesamt["ost"]))
+        if gebiet.sued < gebiet.nord and gebiet.west < gebiet.ost:
+            break
+    else:
+        raise SystemExit(f"{name} liegt außerhalb der Gesamtgebiete")
     return gebiet, 3 if breite < g["fein_bis"] else 1
 
 
@@ -80,7 +87,9 @@ def kachel(name: str, ausgabe: Path, arbeitsordner: Path, cache: Path) -> None:
 
 
 def puffer(ausgabe: Path, cache: Path) -> None:
-    gesamt = gebiete()["gesamt"]
+    alle = gesamtgebiete(gebiete())
+    gesamt = {"sued": min(x["sued"] for x in alle), "nord": max(x["nord"] for x in alle),
+              "west": min(x["west"] for x in alle), "ost": max(x["ost"] for x in alle)}
     nord = gesamt["nord"] + PUFFER_KM / 111.2
     km_je_grad = 111.2 * math.cos(math.radians(nord))
     gebiet = hm.Gebiet(sued=gesamt["sued"] - PUFFER_KM / 111.2, nord=nord,
