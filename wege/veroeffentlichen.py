@@ -100,10 +100,21 @@ def main() -> int:
 
     notizen = (f"Datenstand {args.stand}. Quellen und Lizenzen: siehe README. "
                "Die App Mondschein lädt diese Dateien über daten.json.")
-    dateien = [str(ausgabe)] + [str(args.daten / n) for n in neu]
-    subprocess.run([GH, "release", "create", tag, *dateien, "--repo", REPO, "--title", f"Daten {args.stand}",
-                    "--notes", notizen, "--latest"], check=True)
-    print(f"Release {tag} veröffentlicht")
+    gibt_es = subprocess.run([GH, "release", "view", tag, "--repo", REPO], capture_output=True).returncode == 0
+    if gibt_es:
+        # Zweiter Lauf am selben Tag: Dateien im bestehenden Release ersetzen – erst die Daten, dann die
+        # Liste, damit daten.json nie auf eine Datei zeigt, die es noch nicht gibt
+        if neu:
+            subprocess.run([GH, "release", "upload", tag, *[str(args.daten / n) for n in neu], "--repo", REPO,
+                            "--clobber"], check=True)
+        subprocess.run([GH, "release", "upload", tag, str(ausgabe), "--repo", REPO, "--clobber"], check=True)
+        subprocess.run([GH, "release", "edit", tag, "--repo", REPO, "--latest"], check=True)
+        print(f"Release {tag} aktualisiert")
+    else:
+        dateien = [str(ausgabe)] + [str(args.daten / n) for n in neu]
+        subprocess.run([GH, "release", "create", tag, *dateien, "--repo", REPO, "--title", f"Daten {args.stand}",
+                        "--notes", notizen, "--latest"], check=True)
+        print(f"Release {tag} veröffentlicht")
     return 0
 
 
