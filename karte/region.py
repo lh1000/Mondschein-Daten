@@ -10,6 +10,7 @@ Höhenkacheln einer Region aus gebiete/gebiete.json bzw. der daten.json des neue
 
 import json
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -37,12 +38,19 @@ def main() -> None:
         for pfad in r["osm"]:
             print(f"https://download.geofabrik.de/{pfad}-latest.osm.pbf")
     elif was == "hoehen":
-        with urllib.request.urlopen(f"{LISTE}?t=1", timeout=60) as antwort:
-            for d in json.load(antwort)["dateien"]:
-                kachel = d["name"].startswith("mondschein-hoehen-N")
-                puffer = d["name"].startswith("mondschein-hoehen-puffer-") and sys.argv[3:] == ["puffer"]
-                if (kachel or puffer) and rid in d.get("regionen", []):
-                    print(d["url"])
+        # Neue Liste erzwingen (wechselnder Parameter, sonst liefert GitHub teils eine ältere Fassung);
+        # ohne Kacheln für die Region bis zu 5 min erneut fragen, dann Fehler
+        for versuch in range(6):
+            with urllib.request.urlopen(f"{LISTE}?t={time.time():.0f}", timeout=60) as antwort:
+                dateien = json.load(antwort)["dateien"]
+            treffer = [d["url"] for d in dateien
+                       if rid in d.get("regionen", []) and (d["name"].startswith("mondschein-hoehen-N")
+                       or (d["name"].startswith("mondschein-hoehen-puffer-") and sys.argv[3:] == ["puffer"]))]
+            if any("hoehen-N" in u for u in treffer):
+                print("\n".join(treffer))
+                return
+            time.sleep(60)
+        sys.exit(f"Keine Höhenkacheln für {rid} in daten.json")
     else:
         sys.exit(__doc__)
 
