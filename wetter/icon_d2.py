@@ -34,6 +34,7 @@ import datetime as dt
 import hashlib
 import io
 import json
+import math
 import re
 import struct
 import sys
@@ -53,10 +54,13 @@ KENNUNG = b"MSWOLKE1"
 # Globales 0,02°-Gitter, wie Wettergitter in core/ (Index = round(Grad / 0,02))
 WEITE = 0.02
 
-# Gebiet: fein (0,02°) um das Kerngebiet mit ca. 60 km Rand, grob (0,04°) bis ca. 200 km
-# (Horizontpuffer, docs/konzept.md Abschnitt 7). Grenzen in Grad: Süd, Nord, West, Ost.
-FEIN = (46.60, 48.90, 9.80, 14.00)
-GROB = (45.40, 50.20, 8.00, 16.20)
+# Gebiet: fein (0,02°) um das Gesamtgebiet mit ca. 60 km Rand, grob (0,04°) bis ca. 200 km
+# (Horizontpuffer, docs/konzept.md Abschnitt 7). Seit der Gebietserweiterung (Meilenstein 30) in
+# Kacheln: fein 1° × 1°, grob 2° × 2° (nur außerhalb des feinen Gebiets); die App lädt per HTTP-Range
+# nur die Kacheln um ihre Regionen (core: Wolkenausschnitt). Gesamtgebiete aus tools/gebiete/gebiete.json.
+GEBIETE = Path(__file__).resolve().parent.parent / "gebiete" / "gebiete.json"
+RAND_FEIN = 0.6  # Grad
+RAND_GROB = 2.5
 
 # Flächen bis knapp über die Wolkenobergrenze der Sichtlinie (Sichtlinie.OBERGRENZE = 12 km)
 OBERGRENZE = 12_500.0
@@ -158,6 +162,27 @@ class Ebene:
         return np.nanmean(teil, axis=(1, 3)) if mittel else teil[:, 0, :, 0]
 
 
+def kacheln() -> list["Ebene"]:
+    """Feine Kacheln um jedes Gesamtgebiet, dann grobe Kacheln bis 200 km, soweit nicht ganz fein."""
+    gesamt = json.loads(GEBIETE.read_text(encoding="utf-8"))["gesamt"]
+    gesamt = gesamt if isinstance(gesamt, list) else [gesamt]
+
+    def rechtecke(rand: float, kante: int) -> set[tuple[int, int]]:
+        r = set()
+        for g in gesamt:
+            for b in range(math.floor((g["sued"] - rand) / kante) * kante, math.ceil(g["nord"] + rand), kante):
+                for l in range(math.floor((g["west"] - rand) / kante) * kante, math.ceil(g["ost"] + rand), kante):
+                    r.add((b, l))
+        return r
+
+    fein = sorted(rechtecke(RAND_FEIN, 1))
+    grob = sorted(k for k in rechtecke(RAND_GROB, 2)
+                  if not all((k[0] + db, k[1] + dl) in fein for db in (0, 1) for dl in (0, 1)))
+    # Grenzen so, dass benachbarte Kacheln lückenlos und ohne Überlappung aneinanderstoßen
+    return ([Ebene((b, b + 1 - WEITE, l, l + 1 - WEITE), 1) for b, l in fein]
+            + [Ebene((b, b + 2 - 2 * WEITE, l, l + 2 - 2 * WEITE), 2) for b, l in grob])
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--ziel", type=Path)
@@ -176,7 +201,8 @@ def main() -> None:
     if a.ziel is None:
         p.error("--ziel fehlt")
     print(f"Lauf {lauf}", flush=True)
-    ebenen = [Ebene(FEIN, 1), Ebene(GROB, 2)]
+    ebenen = kacheln()
+    print(f"{len(ebenen)} Kacheln", flush=True)
     pool = ThreadPoolExecutor(a.parallel)
 
     # Höhen der 66 Halbflächen (feste Modellgeometrie); Flächenmitte = Mittel zweier Halbflächen
