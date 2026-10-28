@@ -44,6 +44,7 @@ GEO = 100_000  # Geometrie in 1/100 000 Grad (ca. 1,1 m Breite, 0,75 m Länge)
 VEREINFACHUNG = 0.1  # Meter: nur Punkte (fast) auf einer Geraden entfallen; gröber kürzt Kehren und Stufen
 HOEHENSCHRITT = 20.0  # Meter: Abstand der Höhenabfragen für Auf- und Abstieg
 FANG = 300.0  # Meter: Startpunkte weiter weg vom Wegenetz werden verworfen
+BERGBAHN_NAH = 60.0  # Meter: Bahnhalte und Bahnsteige so nah an einer Zahnrad- oder Standseilbahn sind Bergbahnhalte
 ERDRADIUS = 6_371_000.0
 
 # Wegart (Byte in der Datei, muss zu core `Wegart` passen)
@@ -104,7 +105,24 @@ def startart(tags) -> int | None:
 
 
 STANDARDNAME = {PARKPLATZ: "Parkplatz", HALTESTELLE: "Haltestelle", BAHNHOF: "Bahnhof", HUETTE: "Hütte",
-                SEILBAHN: "Seilbahnstation"}
+                SEILBAHN: "Bergbahnstation"}
+
+
+def ist_bahnhalt(tags) -> bool:
+    """Halt einer Bahn (Bahnhof, Haltepunkt, Bahnsteig) – nicht Bushaltestelle."""
+    if tags.get("highway") == "bus_stop" or tags.get("bus") == "yes":
+        return False
+    return tags.get("railway") in ("station", "halt", "platform") or tags.get("public_transport") == "platform"
+
+
+def ist_bergbahn(tags) -> bool:
+    """Gleis einer Zahnrad- oder Standseilbahn: Wer dort einsteigt, fährt Bahn statt zu gehen.
+    Halte daran zählen wie Seilbahnstationen und sind nie Startpunkt der Wegsuche (Seilbahnzeiten
+    zählen nicht, nur Gehzeiten)."""
+    if tags.get("railway") == "funicular":
+        return True
+    zahnrad = tags.get("rack") or tags.get("railway:rack")
+    return tags.get("railway") in ("rail", "narrow_gauge", "light_rail") and zahnrad not in (None, "no")
 
 
 class Sammler(osmium.SimpleHandler):
@@ -112,7 +130,9 @@ class Sammler(osmium.SimpleHandler):
         super().__init__()
         self.g = gebiet
         self.wege: dict[int, Weg] = {}
-        self.starts: dict[tuple[str, int], tuple[float, float, int, str]] = {}
+        # Startpunkte: Breite, Länge, Art, Name, Bahnhalt (für die Prüfung auf Bergbahnen)
+        self.starts: dict[tuple[str, int], tuple[float, float, int, str, bool]] = {}
+        self.bergbahn: list[np.ndarray] = []  # Punkte (Breite, Länge) von Zahnrad- und Standseilbahnen
 
     def innen(self, b: float, l: float) -> bool:
         return self.g.sued <= b <= self.g.nord and self.g.west <= l <= self.g.ost
@@ -121,9 +141,15 @@ class Sammler(osmium.SimpleHandler):
         art = startart(n.tags)
         if art is None or not n.location.valid() or not self.innen(n.location.lat, n.location.lon):
             return
-        self.starts[("n", n.id)] = (n.location.lat, n.location.lon, art, n.tags.get("name", ""))
+        self.starts[("n", n.id)] = (n.location.lat, n.location.lon, art, n.tags.get("name", ""), ist_bahnhalt(n.tags))
 
     def way(self, w):
+        if ist_bergbahn(w.tags):
+            try:
+                self.bergbahn.append(np.array([(n.lat, n.lon) for n in w.nodes], dtype=np.float64))
+            except osmium.InvalidLocationError:
+                pass
+            return
         art = begehbar(w.tags)
         start = startart(w.tags) if art is None else None
         if art is None and start is None:
@@ -140,7 +166,8 @@ class Sammler(osmium.SimpleHandler):
         if not drin.any():
             return
         if start is not None:  # Parkplatz als Fläche: Mittelpunkt
-            self.starts[("w", w.id)] = (float(b.mean()), float(l.mean()), start, w.tags.get("name", ""))
+            self.starts[("w", w.id)] = (float(b.mean()), float(l.mean()), start, w.tags.get("name", ""),
+                                        ist_bahnhalt(w.tags))
             return
         if w.id in self.wege:  # aus dem Nachbar-Extrakt schon da
             return
@@ -189,6 +216,19 @@ def meter(b1, l1, b2, l2) -> np.ndarray:
     p1, p2 = np.radians(b1), np.radians(b2)
     h = np.sin((p2 - p1) / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(np.radians(l2 - l1) / 2) ** 2
     return 2 * ERDRADIUS * np.arcsin(np.sqrt(h))
+
+
+def verdichten(punkte: np.ndarray, schritt: float) -> np.ndarray:
+    """Linie (Breite, Länge in Grad) mit Zwischenpunkten alle [schritt] Meter, damit der Abstand zu den
+    Punkten auch mitten auf langen geraden Stücken stimmt."""
+    if len(punkte) < 2:
+        return punkte
+    teile = [punkte[:1]]
+    for a, b in zip(punkte[:-1], punkte[1:]):
+        n = max(1, math.ceil(float(meter(a[0], a[1], b[0], b[1])) / schritt))
+        u = np.linspace(0, 1, n + 1)[1:, None]
+        teile.append(a + u * (b - a))
+    return np.concatenate(teile)
 
 
 def douglas_peucker(b: np.ndarray, l: np.ndarray, toleranz: float) -> np.ndarray:
@@ -258,8 +298,21 @@ def main() -> int:
     alle_l = np.concatenate([w.laenge for w in wege])
     cos0 = math.cos(math.radians((gebiet.sued + gebiet.nord) / 2))
     baum = cKDTree(np.column_stack([alle_b * 111_195.0, alle_l * 111_195.0 * cos0]))
+    # Halte von Zahnrad- und Standseilbahnen (Wendelstein, Zugspitze, Rosshütte …) wie Seilbahnstationen
+    if sammler.bergbahn:
+        gleis = np.concatenate([verdichten(g, 10.0) for g in sammler.bergbahn])
+        gleisbaum = cKDTree(np.column_stack([gleis[:, 0] * 111_195.0, gleis[:, 1] * 111_195.0 * cos0]))
+        bergbahnhalte = 0
+        for k, (b, l, art, name, bahn) in list(sammler.starts.items()):
+            if bahn and art in (BAHNHOF, HALTESTELLE):
+                d, _ = gleisbaum.query([b * 111_195.0, l * 111_195.0 * cos0])
+                if d <= BERGBAHN_NAH:
+                    sammler.starts[k] = (b, l, SEILBAHN, name, bahn)
+                    bergbahnhalte += 1
+        print(f"  {bergbahnhalte} Halte an Zahnrad- und Standseilbahnen")
+
     starts = []
-    for (b, l, art, name) in sammler.starts.values():
+    for (b, l, art, name, _) in sammler.starts.values():
         d, i = baum.query([b * 111_195.0, l * 111_195.0 * cos0])
         if d <= FANG:
             starts.append((b, l, art, name or STANDARDNAME[art], int(alle_ids[i])))
