@@ -75,7 +75,8 @@ class Mosaik:
     """Liest beliebige Ausschnitte aus den 1°-Kacheln, Pixelmitten auf ganzen Bogensekunden.
 
     Kachel N47/E011 enthält die Mitten 48°00′00″ (Zeile 0) bis 47°00′01″ (Zeile 3599) und
-    11°00′00″ (Spalte 0) bis 11°59′59″ (Spalte 3599). Gilt so nur unterhalb von 50° Breite.
+    11°00′00″ (Spalte 0) bis 11°59′59″ (Spalte 3599). Ab 50° Breite hat Copernicus nur 2400 Spalten
+    (1,5″); sie werden auf ganze Bogensekunden gebracht (nächster Wert).
     """
 
     def __init__(self, cache: Path):
@@ -91,8 +92,6 @@ class Mosaik:
         return self._kacheln[schluessel]
 
     def _lade(self, lat: int, lon: int) -> np.ndarray | None:
-        if lat >= 50:
-            raise ValueError("Ab 50° Breite haben die Kacheln weniger Spalten – nicht unterstützt.")
         name = kachelname(lat, lon)
         pfad = self.cache / f"{name}.tif"
         if not pfad.exists():
@@ -105,9 +104,12 @@ class Mosaik:
                 raise
             pfad.with_suffix(".part").rename(pfad)
         with rasterio.open(pfad) as d:
-            if (d.width, d.height) != (3600, 3600) or abs(d.transform.c - (lon - 0.5 / 3600)) > 1e-9:
+            if d.height != 3600 or d.width not in (3600, 2400) or abs(d.transform.c - (lon - 0.5 / d.width)) > 1e-9:
                 raise ValueError(f"Unerwartete Rastergeometrie in {name}")
-            return d.read(1)
+            daten = d.read(1)
+        if daten.shape[1] == 2400:
+            daten = daten[:, (2 * np.arange(3600) + 1) // 3]  # Mitte s″ → Spalte s / 1,5
+        return daten
 
     def ausschnitt(self, nord: int, sued: int, west: int, ost: int) -> np.ndarray:
         """Höhen (float32, NaN = keine Daten) für Mitten nord..sued × west..ost in Bogensekunden."""
@@ -178,9 +180,9 @@ def kern_ebene(mosaik: Mosaik) -> Ebene:
     return Ebene(nord, west, 1, als_int16(mosaik.ausschnitt(nord, sued, west, ost)))
 
 
-def puffer_ebene(mosaik: Mosaik, schritt: int = 3) -> Ebene:
+def puffer_ebene(mosaik: Mosaik, schritt: int = 3, gebiet: Gebiet = PUFFER) -> Ebene:
     """Maximum je schritt×schritt-Block um die Mitte des groben Rasters."""
-    nord, sued, west, ost = raster(PUFFER, schritt)
+    nord, sued, west, ost = raster(gebiet, schritt)
     zeilen = (nord - sued) // schritt + 1
     spalten = (ost - west) // schritt + 1
     print(f"Puffer: {zeilen} × {spalten} Punkte ({schritt}″, Maximum)")

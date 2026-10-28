@@ -1,0 +1,19 @@
+# Erreichbarkeit und Durchsatz der Datenquellen prüfen (Mondschein, Gebietserweiterung E2). Ändert nichts.
+name: Quellen sondieren
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sondieren:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Quellen abfragen
+        run: python3 sondierung/sondierung.py

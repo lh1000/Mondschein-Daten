@@ -1,0 +1,97 @@
+# Höhenkacheln 1° × 1° und den gemeinsamen Horizontpuffer erzeugen und veröffentlichen
+# (Mondschein, Gebietserweiterung E2, hoehen/kachel.py). Nur auf Knopfdruck; je Kachel ein Job.
+name: Höhen aufbereiten
+
+on:
+  workflow_dispatch:
+    inputs:
+      kacheln:
+        description: "Kacheln (Südwestecke, z. B. N47E010), mit Leerzeichen getrennt; „puffer“ = Horizontpuffer"
+        default: "puffer N46E009 N46E010 N47E009 N47E010"
+      veroeffentlichen:
+        description: "Als Datenstand veröffentlichen (sonst nur als Artefakte)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      kacheln: ${{ steps.liste.outputs.kacheln }}
+    steps:
+      - id: liste
+        env:
+          KACHELN: ${{ inputs.kacheln }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, re, sys
+          k = os.environ["KACHELN"].split()
+          if not k or not all(re.fullmatch(r"puffer|N\d\dE\d\d\d", x) for x in k):
+              sys.exit(f"Ungültige Kacheln: {k}")
+          print("kacheln=" + json.dumps(k))
+          PY
+
+  kachel:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        kachel: ${{ fromJSON(needs.plan.outputs.kacheln) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: pip install -r hoehen/requirements.txt
+      - name: Kachel ${{ matrix.kachel }}
+        env:
+          KACHEL: ${{ matrix.kachel }}
+        run: |
+          mkdir -p daten
+          cd hoehen
+          if [ "$KACHEL" = puffer ]; then
+            python kachel.py --puffer --ausgabe ../daten/mondschein-hoehen-puffer.bin --cache ../copernicus
+          else
+            python kachel.py --kachel "$KACHEL" --ausgabe "../daten/mondschein-hoehen-$KACHEL.bin" \
+              --arbeitsordner ../arbeit --cache ../copernicus
+          fi
+          ls -la ../daten
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hoehen-${{ matrix.kachel }}
+          path: daten/*.bin
+          retention-days: 5
+          compression-level: 1
+
+  veroeffentlichen:
+    needs: kachel
+    # Auch wenn einzelne Kacheln scheitern: die fertigen veröffentlichen
+    if: ${{ !cancelled() && inputs.veroeffentlichen }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: daten
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hoehen-*
+          path: daten
+          merge-multiple: true
+      - name: Veröffentlichen
+        run: |
+          ls -la daten
+          python3 wege/veroeffentlichen.py --daten daten --stand "$(date -u +%F)"

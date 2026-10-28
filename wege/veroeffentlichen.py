@@ -22,6 +22,7 @@ import datetime as dt
 import hashlib
 import json
 import shutil
+import re
 import subprocess
 import sys
 import urllib.request
@@ -40,10 +41,16 @@ DATEIEN = {
     "mondschein-wege.bin": "Wegenetz (OpenStreetMap)",
     "mondschein-wald.bin": "Wald am Weg (Meta/WRI CHMv2, Copernicus)",
 }
-# Ladbare Gebiete (Gebietserweiterung E1, notizen/recherche/gebietserweiterung.md). Die Dateien oben
-# gehören zum Kerngebiet; Dateien ohne Region (leere Liste) wären Grunddaten, die jede App lädt.
-REGIONEN = [{"id": "kern", "name": "Kerngebiet (Werdenfels bis Berchtesgaden)"}]
-REGION_DER_DATEI = {name: ["kern"] for name in DATEIEN}
+# Ladbare Gebiete (Gebietserweiterung, docs/konzept.md Stufe 5): Die Dateien oben gehören zum Kerngebiet.
+# Regionsdateien heißen mondschein-<art>-<region>.<endung>, Höhenkacheln mondschein-hoehen-N47E010.bin
+# (gehören zu allen Regionen außer „kern“, die die Kachel berühren), der gemeinsame Horizontpuffer
+# mondschein-hoehen-puffer.bin (zu allen Regionen außer „kern“). Dateien ohne Region wären Grunddaten.
+GEBIETE = Path(__file__).resolve().parent.parent / "gebiete" / "gebiete.json"
+KERN = {"id": "kern", "name": "Kerngebiet (Werdenfels bis Berchtesgaden)", "sued": 47.25, "nord": 47.90,
+        "west": 10.70, "ost": 13.15}
+ARTEN = {"karte": "Grundkarte", "wandern": "Wander-Ebene", "schummerung": "Schummerung",
+         "hoehenlinien": "Höhenlinien", "wege": "Wegenetz", "wald": "Wald am Weg", "hoehen": "Höhen"}
+REGIONSDATEI = re.compile(r"mondschein-(karte|wandern|schummerung|hoehenlinien|wege|wald|hoehen)-([A-Za-z0-9-]+)\.(bin|pmtiles)")
 # Dürfen fehlen, auch wenn sie noch nie veröffentlicht wurden (eigener Workflow im Daten-Repo)
 OPTIONAL = {"mondschein-wald.bin"}
 LISTE = f"https://github.com/{REPO}/releases/latest/download/daten.json"
@@ -57,6 +64,37 @@ def bisherige() -> dict[str, dict]:
     except Exception as fehler:  # noqa: BLE001 – erstes Release oder kein Netz: alles hochladen
         print(f"  keine bisherige daten.json ({fehler}) – lade alle Dateien hoch")
         return {}
+
+
+def regionen() -> list[dict]:
+    """Regionen aus gebiete.json (Grenzen in Grad); ohne Datei nur das Kerngebiet."""
+    if GEBIETE.exists():
+        return json.loads(GEBIETE.read_text(encoding="utf-8"))["regionen"]
+    return [KERN]
+
+
+def zuordnung(name: str, alle: list[dict]) -> tuple[str, list[str]] | None:
+    """Beschreibung und Regionen einer Datei; `None`, wenn sie nicht zu den Daten der App gehört."""
+    if name in DATEIEN:
+        return DATEIEN[name], ["kern"]
+    m = REGIONSDATEI.fullmatch(name)
+    if not m:
+        return None
+    art, teil = m[1], m[2]
+    weitere = [r for r in alle if r["id"] != "kern"]
+    if art == "hoehen" and teil == "puffer":
+        return "Horizont um die Regionen (Copernicus)", [r["id"] for r in weitere]
+    if art == "hoehen":
+        k = re.fullmatch(r"N(\d\d)E(\d\d\d)", teil)
+        if not k:
+            return None
+        b, l = int(k[1]), int(k[2])
+        zu = [r["id"] for r in weitere if r["sued"] < b + 1 and r["nord"] > b and r["west"] < l + 1 and r["ost"] > l]
+        return f"Höhen {teil} (BEV, Bayern, Copernicus)", zu
+    region = next((r for r in alle if r["id"] == teil), None)
+    if region is None:
+        return None
+    return f"{ARTEN[art]} {region['name']}", [teil]
 
 
 def pruefsumme(pfad: Path) -> str:
@@ -76,10 +114,16 @@ def main() -> int:
     args = parser.parse_args()
 
     tag = f"daten-{args.stand}"
-    liste = {"stand": args.stand, "regionen": REGIONEN, "dateien": []}
+    liste = {"stand": args.stand, "regionen": [], "dateien": []}
     alt = bisherige()
+    alle = regionen()
     neu: list[str] = []
-    for name, beschreibung in DATEIEN.items():
+    # Erst die Dateien des Kerngebiets in fester Reihenfolge, dann die Regionsdateien (neu im Ordner
+    # oder schon veröffentlicht)
+    weitere = {p.name for p in args.daten.glob("mondschein-*") if zuordnung(p.name, alle)} | set(alt)
+    namen = list(DATEIEN) + sorted(n for n in weitere if n not in DATEIEN and zuordnung(n, alle))
+    for name in namen:
+        beschreibung, zu = zuordnung(name, alle)
         pfad = args.daten / name
         if not pfad.exists():
             if name not in alt and name in OPTIONAL:
@@ -87,7 +131,7 @@ def main() -> int:
                 continue
             if name not in alt:
                 raise SystemExit(f"{pfad} fehlt und ist noch nie veröffentlicht worden")
-            liste["dateien"].append({**alt[name], "regionen": REGION_DER_DATEI[name]})
+            liste["dateien"].append({**alt[name], "beschreibung": beschreibung, "regionen": zu})
             print(f"  {name}: nicht im Ordner – bisheriger Eintrag bleibt")
             continue
         print(f"  {name}: Prüfsumme …", end="", flush=True)
@@ -99,9 +143,11 @@ def main() -> int:
             url = f"https://github.com/{REPO}/releases/download/{tag}/{name}"
             neu.append(name)
         eintrag = {"name": name, "beschreibung": beschreibung, "groesse": pfad.stat().st_size,
-                   "sha256": summe, "url": url, "regionen": REGION_DER_DATEI[name]}
+                   "sha256": summe, "url": url, "regionen": zu}
         liste["dateien"].append(eintrag)
         print(f" {eintrag['groesse'] / 1e6:.0f} MB" + (" – neu" if name in neu else " – unverändert"))
+    benutzt = {r for d in liste["dateien"] for r in d["regionen"]}
+    liste["regionen"] = [{"id": r["id"], "name": r["name"]} for r in alle if r["id"] in benutzt]
     ausgabe = args.daten / "daten.json"
     ausgabe.write_text(json.dumps(liste, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"{ausgabe} geschrieben")
