@@ -34,7 +34,7 @@ import shapely
 from pmtiles.tile import Compression, TileType, zxy_to_tileid
 from shapely.geometry import LineString, Point
 
-import gelaende
+import gelaende as karte_gebiet
 from gelaende import Hoehen, kacheln_im_gebiet, schreibe
 
 ZOOM = range(9, 15)
@@ -206,7 +206,7 @@ class Sammler:
         }
 
     def _punkt(self, schluessel, klasse: str, t, lon: float, lat: float) -> None:
-        if not (gelaende.WEST <= lon <= gelaende.OST and gelaende.SUED <= lat <= gelaende.NORD):
+        if not (karte_gebiet.WEST <= lon <= karte_gebiet.OST and karte_gebiet.SUED <= lat <= karte_gebiet.NORD):
             return
         gelaende = None
         if klasse in ("einkehr?", "parkplatz"):
@@ -259,7 +259,7 @@ def hoehe_aus_tag(wert: str | None) -> int | None:
 def im_gebiet(koord) -> bool:
     lons = [c[0] for c in koord]
     lats = [c[1] for c in koord]
-    return max(lons) >= gelaende.WEST and min(lons) <= gelaende.OST and max(lats) >= gelaende.SUED and min(lats) <= gelaende.NORD
+    return max(lons) >= karte_gebiet.WEST and min(lons) <= karte_gebiet.OST and max(lats) >= karte_gebiet.SUED and min(lats) <= karte_gebiet.NORD
 
 
 # ---------------------------------------------------------------- Bedeutung → Mindestzoom
@@ -450,7 +450,7 @@ def main() -> int:
     parser.add_argument("--region", help="Region der Gebietserweiterung: hängt -<region> an den Dateinamen")
     args = parser.parse_args()
     if args.gebiet:
-        gelaende.gebiet_setzen(*map(float, args.gebiet.split(",")))
+        karte_gebiet.gebiet_setzen(*map(float, args.gebiet.split(",")))
     anhang = f"-{args.region}" if args.region else ""
 
     print("1/4 Relevante Objekte herausfiltern")
