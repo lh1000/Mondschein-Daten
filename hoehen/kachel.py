@@ -11,12 +11,12 @@ Schreibt `mondschein-hoehen-N47E010.bin` im Format der Höhendatei (README.md) m
   um eine Zelle (sonst fiele die App an den Nähten auf den groben Puffer zurück); begrenzt auf das
   Gesamtgebiet in tools/gebiete/gebiete.json.
 
-Mit --puffer statt --kachel: der gemeinsame grobe Horizontpuffer `mondschein-hoehen-puffer.bin`
-(3″, Maximum je Zelle aus Copernicus) um das Gesamtgebiet plus 150 km.
+Mit --puffer <gesamtgebiet> statt --kachel: der grobe Horizontpuffer `mondschein-hoehen-puffer-<id>.bin`
+(3″, Maximum je Zelle aus Copernicus) um ein Gesamtgebiet (z. B. „sued“, „kueste“) plus 150 km.
 
 Aufruf (in GitHub Actions: Workflow „Höhen aufbereiten“ im Daten-Repo):
     python kachel.py --kachel N47E010 --ausgabe mondschein-hoehen-N47E010.bin
-    python kachel.py --puffer --ausgabe mondschein-hoehen-puffer.bin
+    python kachel.py --puffer sued --ausgabe mondschein-hoehen-puffer-sued.bin
 """
 
 from __future__ import annotations
@@ -86,10 +86,10 @@ def kachel(name: str, ausgabe: Path, arbeitsordner: Path, cache: Path) -> None:
     hm.schreibe(ausgabe, [e])
 
 
-def puffer(ausgabe: Path, cache: Path) -> None:
-    alle = gesamtgebiete(gebiete())
-    gesamt = {"sued": min(x["sued"] for x in alle), "nord": max(x["nord"] for x in alle),
-              "west": min(x["west"] for x in alle), "ost": max(x["ost"] for x in alle)}
+def puffer(gid: str, ausgabe: Path, cache: Path) -> None:
+    gesamt = next((x for x in gesamtgebiete(gebiete()) if x.get("id") == gid), None)
+    if gesamt is None:
+        raise SystemExit(f"Gesamtgebiet {gid} fehlt in {GEBIETE}")
     nord = gesamt["nord"] + PUFFER_KM / 111.2
     km_je_grad = 111.2 * math.cos(math.radians(nord))
     gebiet = hm.Gebiet(sued=gesamt["sued"] - PUFFER_KM / 111.2, nord=nord,
@@ -103,14 +103,14 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     art = p.add_mutually_exclusive_group(required=True)
     art.add_argument("--kachel", help="z. B. N47E010 (Südwestecke)")
-    art.add_argument("--puffer", action="store_true", help="gemeinsamer 3″-Horizontpuffer")
+    art.add_argument("--puffer", metavar="GESAMTGEBIET", help="3″-Horizontpuffer um ein Gesamtgebiet (sued, kueste)")
     p.add_argument("--ausgabe", type=Path, required=True)
     p.add_argument("--arbeitsordner", type=Path, default=Path("arbeit"))
     p.add_argument("--cache", type=Path, default=Path("copernicus"))
     a = p.parse_args()
     beginn = time.time()
     if a.puffer:
-        puffer(a.ausgabe, a.cache)
+        puffer(a.puffer, a.ausgabe, a.cache)
     else:
         kachel(a.kachel, a.ausgabe, a.arbeitsordner, a.cache)
     print(f"fertig nach {(time.time() - beginn) / 60:.0f} min")

@@ -2,6 +2,7 @@
  "_hinweis": "Regionen der Gebietserweiterung (docs/konzept.md Stufe 5, notizen/recherche/gebietserweiterung.md). Grenzen in Grad. Das Rechteck einer Region ist ihr Kern; Daten wie Wegenetz und Wald bekommen ca. 25 km Überlappung. osm: Geofabrik-Pfade der Extrakte, die die Region samt Rand abdecken. gesamt: Liste der zusammenhängenden Gesamtgebiete (Höhenkacheln und Wolken werden darauf begrenzt).",
  "gesamt": [
   {
+   "id": "sued",
    "sued": 46.7,
    "nord": 50.6,
    "west": 7.4,
@@ -9,6 +10,7 @@
    "name": "Süddeutschland und Alpen"
   },
   {
+   "id": "kueste",
    "name": "Nordseeküste Amsterdam bis Bremerhaven",
    "sued": 52.0,
    "nord": 53.8,

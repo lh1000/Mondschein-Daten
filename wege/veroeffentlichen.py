@@ -43,8 +43,9 @@ DATEIEN = {
 }
 # Ladbare Gebiete (Gebietserweiterung, docs/konzept.md Stufe 5): Die Dateien oben gehören zum Kerngebiet.
 # Regionsdateien heißen mondschein-<art>-<region>.<endung>, Höhenkacheln mondschein-hoehen-N47E010.bin
-# (gehören zu allen Regionen außer „kern“, die die Kachel berühren), der gemeinsame Horizontpuffer
-# mondschein-hoehen-puffer.bin (zu allen Regionen außer „kern“). Dateien ohne Region wären Grunddaten.
+# (gehören zu allen Regionen außer „kern“, die die Kachel berühren), die Horizontpuffer
+# mondschein-hoehen-puffer-<gesamtgebiet>.bin (zu allen Regionen darin außer „kern“). Dateien ohne
+# Zuordnung (z. B. der frühere gemeinsame Puffer) fallen aus der Liste. Dateien ohne Region wären Grunddaten.
 GEBIETE = Path(__file__).resolve().parent.parent / "gebiete" / "gebiete.json"
 KERN = {"id": "kern", "name": "Kerngebiet (Werdenfels bis Berchtesgaden)", "sued": 47.25, "nord": 47.90,
         "west": 10.70, "ost": 13.15}
@@ -73,6 +74,13 @@ def regionen() -> list[dict]:
     return [KERN]
 
 
+def gesamtgebiete() -> list[dict]:
+    if not GEBIETE.exists():
+        return []
+    g = json.loads(GEBIETE.read_text(encoding="utf-8"))["gesamt"]
+    return g if isinstance(g, list) else [g]
+
+
 def zuordnung(name: str, alle: list[dict]) -> tuple[str, list[str]] | None:
     """Beschreibung und Regionen einer Datei; `None`, wenn sie nicht zu den Daten der App gehört."""
     if name in DATEIEN:
@@ -82,8 +90,13 @@ def zuordnung(name: str, alle: list[dict]) -> tuple[str, list[str]] | None:
         return None
     art, teil = m[1], m[2]
     weitere = [r for r in alle if r["id"] != "kern"]
-    if art == "hoehen" and teil == "puffer":
-        return "Horizont um die Regionen (Copernicus)", [r["id"] for r in weitere]
+    if art == "hoehen" and teil.startswith("puffer-"):
+        # Horizontpuffer je Gesamtgebiet: gehört zu allen Regionen darin (außer „kern“)
+        g = next((x for x in gesamtgebiete() if x.get("id") == teil.removeprefix("puffer-")), None)
+        if g is None:
+            return None
+        zu = [r["id"] for r in weitere if r["sued"] < g["nord"] and r["nord"] > g["sued"] and r["west"] < g["ost"] and r["ost"] > g["west"]]
+        return f"Horizont {g['name']} (Copernicus)", zu
     if art == "hoehen":
         k = re.fullmatch(r"N(\d\d)E(\d\d\d)", teil)
         if not k:

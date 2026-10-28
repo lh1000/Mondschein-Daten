@@ -40,7 +40,7 @@ def main() -> None:
         with urllib.request.urlopen(f"{LISTE}?t=1", timeout=60) as antwort:
             for d in json.load(antwort)["dateien"]:
                 kachel = d["name"].startswith("mondschein-hoehen-N")
-                puffer = d["name"] == "mondschein-hoehen-puffer.bin" and sys.argv[3:] == ["puffer"]
+                puffer = d["name"].startswith("mondschein-hoehen-puffer-") and sys.argv[3:] == ["puffer"]
                 if (kachel or puffer) and rid in d.get("regionen", []):
                     print(d["url"])
     else:
