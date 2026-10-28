@@ -1,0 +1,66 @@
+# Walddatei für das Mondlicht am Weg neu erzeugen und veröffentlichen (Mondschein, Meilenstein 23).
+# Nur auf Knopfdruck: CHMv2 ändert sich selten; neu starten nach großen Änderungen am Wegenetz
+# oder wenn eine neue Copernicus-DLT-Datei im Release „quellen“ liegt.
+name: Wald aufbereiten
+
+on:
+  workflow_dispatch:
+    inputs:
+      veroeffentlichen:
+        description: "Als Datenstand veröffentlichen (sonst nur als Artefakt)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daten
+  cancel-in-progress: false
+
+jobs:
+  wald:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhängigkeiten
+        run: pip install -r wald/requirements.txt
+
+      - name: Wegedatei und Blatttyp laden
+        run: |
+          mkdir -p daten dlt
+          url=$(curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/daten.json \
+                | python -c "import json,sys; print(next(d['url'] for d in json.load(sys.stdin)['dateien'] if d['name']=='mondschein-wege.bin'))")
+          curl -fsSL -o wege.bin "$url"
+          # Copernicus DLT (optional): .tif oder .zip im Release „quellen“
+          gh release download quellen --repo ${{ github.repository }} --dir dlt --pattern '*.tif' --pattern '*.zip' || echo "kein Release quellen – Blatttyp unbekannt"
+          for i in 1 2; do
+            find dlt -name '*.zip' -print0 | while IFS= read -r -d '' z; do unzip -o -q "$z" -d "${z%.zip}" && rm "$z"; done
+          done
+          find dlt -name '*.tif' | sort > dlt.txt
+          ls -la wege.bin; cat dlt.txt
+
+      - name: Walddatei erzeugen
+        run: |
+          python wald/wald.py --wege wege.bin --ausgabe daten/mondschein-wald.bin --zwischenspeicher chm \
+            --stand "$(date -u +%F)" $( [ -s dlt.txt ] && echo --blatttyp $(cat dlt.txt) )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mondschein-wald
+          path: daten/mondschein-wald.bin
+          retention-days: 14
+
+      - name: Veröffentlichen
+        if: ${{ inputs.veroeffentlichen }}
+        run: python wege/veroeffentlichen.py --daten daten --stand "$(date -u +%F)"

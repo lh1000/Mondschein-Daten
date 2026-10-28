@@ -14,6 +14,7 @@ SHA-256-Prüfsumme jeder Datei. Die App lädt daraus nur, was sich geändert hat
 | `mondschein-hoehen.bin` | Höhenmodell: Kern 1/3″ (ca. 10 m), Horizontpuffer 3″ (ca. 90 m) |
 | `mondschein-schummerung.pmtiles` | Schräglicht-Schummerung |
 | `mondschein-hoehenlinien.pmtiles` | Höhenlinien |
+| `mondschein-wald.bin` | Wald am Weg: Lückenquote, Kronenhöhe, Blatttyp je 10-m-Zelle an den Wegen |
 
 ## Quellen und Lizenzen
 
@@ -30,6 +31,10 @@ gemittelt bzw. maximiert, in Kacheln umgewandelt):
   DGM1, Lizenz [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de), verändert.
 - **Copernicus DEM GLO-30:** © DLR e.V. 2010–2014 und © Airbus Defence and Space GmbH 2014–2018, bereitgestellt
   im Rahmen von COPERNICUS durch die Europäische Union und die ESA.
+- **Wald (`mondschein-wald.bin`):** Canopy height: Meta and World Resources Institute (2026), CHMv2,
+  Lizenz [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de), verändert (Lückenquote und Kronenhöhe je
+  1/3″-Zelle). Blatttyp, falls enthalten: Generated using European Union's Copernicus Land Monitoring Service
+  information, HRL Dominant Leaf Type, doi:10.2909/82f93572-9888-47ef-97a1-5cac5985a26a.
 
 Höhenmodell, Schummerung und Höhenlinien dürfen unter denselben Bedingungen weiterverwendet werden
 (Namensnennung der genannten Quellen, Hinweis auf Veränderung).

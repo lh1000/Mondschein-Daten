@@ -38,7 +38,10 @@ DATEIEN = {
     "mondschein-schummerung.pmtiles": "Schummerung",
     "mondschein-hoehenlinien.pmtiles": "Höhenlinien",
     "mondschein-wege.bin": "Wegenetz (OpenStreetMap)",
+    "mondschein-wald.bin": "Wald am Weg (Meta/WRI CHMv2, Copernicus)",
 }
+# Dürfen fehlen, auch wenn sie noch nie veröffentlicht wurden (eigener Workflow im Daten-Repo)
+OPTIONAL = {"mondschein-wald.bin"}
 LISTE = f"https://github.com/{REPO}/releases/latest/download/daten.json"
 
 
@@ -75,6 +78,9 @@ def main() -> int:
     for name, beschreibung in DATEIEN.items():
         pfad = args.daten / name
         if not pfad.exists():
+            if name not in alt and name in OPTIONAL:
+                print(f"  {name}: noch nie veröffentlicht – ausgelassen")
+                continue
             if name not in alt:
                 raise SystemExit(f"{pfad} fehlt und ist noch nie veröffentlicht worden")
             liste["dateien"].append(alt[name])
