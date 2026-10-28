@@ -9,6 +9,7 @@
 #   - Datendateien aus den Releases von lh1000/Mondschein-Daten nach /opt/mondschein/Daten
 #     (dieselbe Ordnerstruktur wie Mondschein/Daten am PC; die Tests mit echten Daten laufen dann mit)
 #   - Python-Pakete für tools/ (osmium, numpy, scipy, rasterio …) in /opt/mondschein/venv
+#   - Gradle-Init-Skript: Maven Central über Googles Spiegel (sonst oft 429)
 # Netz: Standard-Freigaben („Trusted“) plus dl.google.com für das Android-SDK.
 #
 # In der Umgebung als Setup-Skript eintragen: diesen ganzen Inhalt einfügen, oder (sobald die Kopie im
@@ -79,6 +80,41 @@ android_sdk &
 daten &
 python_pakete &
 wait
+
+# Maven Central über Googles Spiegel (repo.maven.apache.org antwortet im Cloud-Netz oft mit 429).
+# Gilt nur in der Cloud; GitHub Actions und der PC laden weiter direkt von Maven Central.
+mkdir -p /root/.gradle/init.d
+cat > /root/.gradle/init.d/maven-spiegel.init.gradle.kts <<'EOF'
+// Cloud-Sitzung: Maven Central über Googles Spiegel laden (repo.maven.apache.org antwortet dort oft 429).
+val spiegel = "https://maven-central.storage-download.googleapis.com/maven2/"
+fun org.gradle.api.artifacts.dsl.RepositoryHandler.spiegel() = maven {
+    name = "MavenCentralSpiegel"
+    url = uri(spiegel)
+    content {
+        excludeGroupByRegex("androidx.*")
+        excludeGroupByRegex("com\\.android.*")
+        excludeGroupByRegex("com\\.google\\.android.*")
+        excludeGroup("com.github.cosinekitty")
+    }
+}
+beforeSettings {
+    pluginManagement.repositories.spiegel()
+    dependencyResolutionManagement.repositories.spiegel()
+}
+// Das Original danach ganz weglassen, sonst fragt Gradle es für Abhängigkeiten von JitPack trotzdem an.
+fun org.gradle.api.artifacts.dsl.RepositoryHandler.ohneOriginal() = removeIf {
+    it is org.gradle.api.artifacts.repositories.MavenArtifactRepository && it.url.host == "repo.maven.apache.org"
+}
+settingsEvaluated {
+    pluginManagement.repositories.ohneOriginal()
+    dependencyResolutionManagement.repositories.ohneOriginal()
+}
+EOF
+# Falls doch etwas hakt: Gradle wiederholt Downloads öfter und wartet länger dazwischen
+cat > /root/.gradle/gradle.properties <<'EOF'
+systemProp.org.gradle.internal.repository.max.retries=8
+systemProp.org.gradle.internal.repository.initial.backoff=2000
+EOF
 
 # Umgebung für jede Shell der Sitzung (Gradle findet das SDK, die Tests die Daten)
 # UTF-8, sonst scheitert der Kotlin-Compiler an Testnamen mit Umlauten und Gedankenstrich
