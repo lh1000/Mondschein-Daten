@@ -1,10 +1,12 @@
 # Wolkendatei aus ICON-D2 aufbereiten und als Release „wolken“ veröffentlichen (Mondschein, Meilenstein 14).
-# Läuft ca. 2 h nach jedem DWD-Lauf (00, 03, …, 21 UTC); öffentliches Repo: Actions-Minuten kostenlos.
+# Sieht stündlich nach (DWD-Läufe 00, 03, …, 21 UTC, verfügbar ca. 2 h später); ist der neueste Lauf
+# schon veröffentlicht, endet der Lauf nach ca. 1 min. Stündlich, weil GitHub geplante Läufe bei hoher
+# Last auslässt oder stundenlang verschiebt. Öffentliches Repo: Actions-Minuten kostenlos.
 name: Wolken aufbereiten
 
 on:
   schedule:
-    - cron: "20 2-23/3 * * *"
+    - cron: "20 * * * *"
   workflow_dispatch:
 
 permissions:
