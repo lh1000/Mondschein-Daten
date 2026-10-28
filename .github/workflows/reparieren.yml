@@ -1,0 +1,41 @@
+# Datenliste reparieren (Mondschein): Dateien, die im Release liegen, aber in daten.json fehlen (z. B. weil ein
+# älterer Lauf sie beim Veröffentlichen verworfen hat), wieder aufnehmen. Lädt sie aus dem Release und
+# veröffentlicht neu; gleiche Dateien werden nur ersetzt.
+name: Datenliste reparieren
+
+on:
+  workflow_dispatch:
+    inputs:
+      muster:
+        description: "Dateimuster im Release, z. B. mondschein-hoehen-puffer-*"
+        default: "mondschein-hoehen-puffer-*"
+      tag:
+        description: "Release, aus dem die Dateien kommen (leer = heutiger Datenstand)"
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daten
+  cancel-in-progress: false
+
+jobs:
+  reparieren:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MUSTER: ${{ inputs.muster }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Dateien aus dem Release laden und neu veröffentlichen
+        run: |
+          tag="${TAG:-daten-$(date -u +%F)}"
+          mkdir -p daten
+          gh release download "$tag" --repo ${{ github.repository }} --pattern "$MUSTER" --dir daten
+          ls -la daten
+          python3 wege/veroeffentlichen.py --daten daten --stand "$(date -u +%F)"
