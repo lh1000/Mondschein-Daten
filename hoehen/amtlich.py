@@ -290,8 +290,10 @@ def bayern_kacheln(arbeitsordner: Path, gitter: Gitter) -> list[tuple[str, int]]
     return gesucht
 
 
-def lade_bytes(name: str, groesse: int) -> bytes:
-    for versuch in range(6):
+def lade_bytes(name: str, groesse: int) -> bytes | None:
+    """Eine Bayern-Kachel; bei Fehlern abwechselnd beide Spiegel, mit wachsender Pause (ca. 10 min insgesamt).
+    `None`, wenn sie sich nicht laden lässt (z. B. Drosselung bei vielen gleichzeitigen Jobs)."""
+    for versuch in range(12):
         url = (BY_URL if versuch % 2 == 0 else BY_ERSATZ_URL).format(name=name)
         try:
             with urllib.request.urlopen(url, timeout=120) as antwort:
@@ -300,22 +302,26 @@ def lade_bytes(name: str, groesse: int) -> bytes:
                 return daten
         except (OSError, urllib.error.URLError):
             pass
-        time.sleep(2 * (versuch + 1))
-    raise RuntimeError(f"Bayern-Kachel {name} ließ sich nicht laden")
+        time.sleep(min(90, 5 * (versuch + 1)))
+    return None
 
 
-def bayern(summen: Summen, arbeitsordner: Path, parallel: int = 6) -> None:
+def bayern(summen: Summen, arbeitsordner: Path, parallel: int = 4) -> None:
     """DGM1-Kacheln parallel laden und nacheinander aufaddieren; nichts wird gespeichert."""
     kacheln = bayern_kacheln(arbeitsordner, summen.gitter)
     offen = [(n, g) for n, g in kacheln if n not in summen.erledigt]
     gesamt = sum(g for _, g in offen)
     print(f"  Bayern: {len(kacheln)} Kacheln im Gebiet, offen {len(offen)} ({gesamt / 1e9:.1f} GB)")
     zeit, geladen = time.time(), 0
+    fehlend: list[str] = []
     with ThreadPoolExecutor(parallel) as pool:
         # höchstens 4 · parallel Kacheln gleichzeitig im Speicher
         for start in range(0, len(offen), 4 * parallel):
             teil = offen[start:start + 4 * parallel]
             for (name, groesse), daten in zip(teil, pool.map(lambda k: lade_bytes(*k), teil)):
+                if daten is None:
+                    fehlend.append(name)  # Copernicus füllt die Lücke; beim nächsten Lauf erneut versucht
+                    continue
                 with MemoryFile(daten) as speicher, speicher.open() as d:
                     a = d.read(1)
                     a[~np.isfinite(a)] = QUELL_LUECKE
@@ -329,6 +335,8 @@ def bayern(summen: Summen, arbeitsordner: Path, parallel: int = 6) -> None:
                 rest = (gesamt - geladen) / max(rate, 1)
                 print(f"    {fertig}/{len(offen)} Kacheln, {geladen / 1e9:.1f} GB, "
                       f"{rate / 1e6:.1f} MB/s, noch ca. {rest / 60:.0f} min")
+    if fehlend:
+        print(f"  Bayern: {len(fehlend)} Kacheln nicht ladbar, dort Copernicus: {' '.join(fehlend[:20])}")
 
 
 # ---------------------------------------------------------------- Schweiz und Liechtenstein (swissALTI3D)
