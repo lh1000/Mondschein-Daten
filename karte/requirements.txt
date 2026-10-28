@@ -1,0 +1,8 @@
+numpy>=2.0
+scipy>=1.13
+scikit-image>=0.24
+pillow>=10
+shapely>=2.0
+mapbox-vector-tile>=2.0
+pmtiles>=3.4
+osmium>=4.0

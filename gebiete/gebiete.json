@@ -1,9 +1,40 @@
 {
-  "_hinweis": "Regionen der Gebietserweiterung (docs/konzept.md Stufe 5, notizen/recherche/gebietserweiterung.md). Grenzen in Grad. Das Rechteck einer Region ist ihr Kern; Daten wie Wegenetz und Wald bekommen ca. 25 km Überlappung. Weitere Regionen kommen in E6 dazu.",
-  "gesamt": {"sued": 46.7, "nord": 50.6, "west": 7.4, "ost": 14.0},
-  "fein_bis": 48.0,
-  "regionen": [
-    {"id": "kern", "name": "Kerngebiet (Werdenfels bis Berchtesgaden)", "sued": 47.25, "nord": 47.90, "west": 10.70, "ost": 13.15},
-    {"id": "allgaeu-vorarlberg", "name": "Allgäu und Vorarlberg", "sued": 46.80, "nord": 47.90, "west": 9.50, "ost": 10.70}
-  ]
+ "_hinweis": "Regionen der Gebietserweiterung (docs/konzept.md Stufe 5, notizen/recherche/gebietserweiterung.md). Grenzen in Grad. Das Rechteck einer Region ist ihr Kern; Daten wie Wegenetz und Wald bekommen ca. 25 km Überlappung. Weitere Regionen kommen in E6 dazu. osm: Geofabrik-Pfade der Extrakte, die die Region samt Rand abdecken.",
+ "gesamt": {
+  "sued": 46.7,
+  "nord": 50.6,
+  "west": 7.4,
+  "ost": 14.0
+ },
+ "fein_bis": 48.0,
+ "regionen": [
+  {
+   "id": "kern",
+   "name": "Kerngebiet (Werdenfels bis Berchtesgaden)",
+   "sued": 47.25,
+   "nord": 47.9,
+   "west": 10.7,
+   "ost": 13.15,
+   "osm": [
+    "europe/germany/bayern/oberbayern",
+    "europe/germany/bayern/schwaben",
+    "europe/austria"
+   ]
+  },
+  {
+   "id": "allgaeu-vorarlberg",
+   "name": "Allgäu und Vorarlberg",
+   "sued": 46.8,
+   "nord": 47.9,
+   "west": 9.5,
+   "ost": 10.7,
+   "osm": [
+    "europe/germany/bayern/schwaben",
+    "europe/germany/baden-wuerttemberg/tuebingen-regbez",
+    "europe/austria",
+    "europe/liechtenstein",
+    "europe/switzerland"
+   ]
+  }
+ ]
 }

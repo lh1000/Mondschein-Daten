@@ -1,0 +1,165 @@
+# Karte einer Region erzeugen und veröffentlichen (Mondschein, Gebietserweiterung E3):
+# Grundkarte (Protomaps-Ausschnitt), Schummerung und Höhenlinien (aus den Höhenkacheln), Wander-Ebene
+# (Geofabrik). Nur auf Knopfdruck; braucht die Höhenkacheln der Region im Datenstand („Höhen aufbereiten“).
+name: Karte aufbereiten
+
+on:
+  workflow_dispatch:
+    inputs:
+      regionen:
+        description: "Regionen (IDs aus gebiete/gebiete.json), mit Leerzeichen getrennt"
+        default: "allgaeu-vorarlberg"
+      veroeffentlichen:
+        description: "Als Datenstand veröffentlichen (sonst nur als Artefakte)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      regionen: ${{ steps.liste.outputs.regionen }}
+    steps:
+      - id: liste
+        env:
+          REGIONEN: ${{ inputs.regionen }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, re, sys
+          r = os.environ["REGIONEN"].split()
+          if not r or not all(re.fullmatch(r"[a-z0-9-]+", x) for x in r) or "kern" in r:
+              sys.exit(f"Ungültige Regionen: {r}")
+          print("regionen=" + json.dumps(r))
+          PY
+
+  grundkarte:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        region: ${{ fromJSON(needs.plan.outputs.regionen) }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REGION: ${{ matrix.region }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Ausschnitt aus dem Protomaps-Build
+        run: |
+          gh release download --repo protomaps/go-pmtiles --pattern '*_Linux_x86_64.tar.gz' --output pmtiles.tar.gz
+          tar xzf pmtiles.tar.gz pmtiles
+          build=$(curl -fsSL https://build-metadata.protomaps.dev/builds.json | grep -oE '[0-9]{8}\.pmtiles' | sort | tail -1)
+          gebiet=$(python3 karte/region.py gebiet "$REGION" 0.05)
+          echo "Build $build, Gebiet $gebiet"
+          mkdir -p daten
+          ./pmtiles extract "https://build.protomaps.com/$build" "daten/mondschein-karte-$REGION.pmtiles" --bbox="$gebiet" --maxzoom=15
+          ls -la daten
+      - uses: actions/upload-artifact@v4
+        with:
+          name: karte-grund-${{ matrix.region }}
+          path: daten/*.pmtiles
+          retention-days: 5
+          compression-level: 0
+
+  gelaende:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        region: ${{ fromJSON(needs.plan.outputs.regionen) }}
+    env:
+      REGION: ${{ matrix.region }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: pip install -r karte/requirements.txt rasterio
+      - name: Höhenkacheln laden
+        run: |
+          mkdir -p hoehen-kacheln daten
+          python3 karte/region.py hoehen "$REGION" | while read -r url; do curl -fsSL -o "hoehen-kacheln/$(basename "$url")" "$url"; done
+          ls -la hoehen-kacheln
+          test -n "$(ls hoehen-kacheln)"
+      - name: Schummerung und Höhenlinien
+        run: |
+          python karte/gelaende.py --hoehen hoehen-kacheln/*.bin --gebiet "$(python3 karte/region.py gebiet "$REGION" 0.05)" \
+            --region "$REGION" --ausgabe daten --arbeiter 4
+          ls -la daten
+      - uses: actions/upload-artifact@v4
+        with:
+          name: karte-gelaende-${{ matrix.region }}
+          path: daten/*.pmtiles
+          retention-days: 5
+          compression-level: 0
+
+  wandern:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        region: ${{ fromJSON(needs.plan.outputs.regionen) }}
+    env:
+      REGION: ${{ matrix.region }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: pip install -r karte/requirements.txt rasterio
+      - name: OSM-Extrakte und Höhenkacheln laden
+        run: |
+          mkdir -p osm hoehen-kacheln daten
+          python3 karte/region.py osm "$REGION" | while read -r url; do curl -fsSL --retry 3 -o "osm/$(basename "$url")" "$url"; done
+          python3 karte/region.py hoehen "$REGION" | while read -r url; do curl -fsSL -o "hoehen-kacheln/$(basename "$url")" "$url"; done
+          ls -la osm hoehen-kacheln
+      - name: Wander-Ebene
+        run: |
+          python karte/wandern.py --pbf osm/*.osm.pbf --hoehen hoehen-kacheln/*.bin \
+            --gebiet "$(python3 karte/region.py gebiet "$REGION" 0.05)" --region "$REGION" --ausgabe daten
+          ls -la daten
+      - uses: actions/upload-artifact@v4
+        with:
+          name: karte-wandern-${{ matrix.region }}
+          path: daten/*.pmtiles
+          retention-days: 5
+          compression-level: 0
+
+  veroeffentlichen:
+    needs: [grundkarte, gelaende, wandern]
+    if: ${{ !cancelled() && inputs.veroeffentlichen }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: daten
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: karte-*
+          path: daten
+          merge-multiple: true
+      - name: Veröffentlichen
+        run: |
+          ls -la daten
+          python3 wege/veroeffentlichen.py --daten daten --stand "$(date -u +%F)"
