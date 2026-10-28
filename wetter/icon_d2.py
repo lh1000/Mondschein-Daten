@@ -40,6 +40,7 @@ import struct
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 import zlib
 from concurrent.futures import ThreadPoolExecutor
@@ -75,16 +76,28 @@ FEHLWERT = 1e20
 ENTSCHLUESSELN = threading.Lock()
 
 
-def laden(url: str, versuche: int = 4) -> bytes:
-    for n in range(versuche):
+def laden(url: str, versuche: int = 4, warten_404: int = 10) -> bytes:
+    """Lädt eine Datei. Fehlt sie (404), wartet es bis zu warten_404 Minuten: Der DWD lädt die Dateien
+    eines Laufs nicht der Reihe nach hoch, die letzte Stunde kann vor einzelnen früheren da sein."""
+    n = fehlt = 0
+    while True:
         try:
             with urllib.request.urlopen(url, timeout=60) as r:
                 return r.read()
+        except urllib.error.HTTPError as fehler:
+            if fehler.code != 404 or fehlt >= warten_404:
+                if fehler.code == 404 or n >= versuche - 1:
+                    raise
+                n += 1
+                time.sleep(2 * n)
+                continue
+            fehlt += 1
+            time.sleep(60)
         except Exception:
-            if n == versuche - 1:
+            if n >= versuche - 1:
                 raise
-            time.sleep(2 * (n + 1))
-    raise AssertionError
+            n += 1
+            time.sleep(2 * n)
 
 
 def grib_feld(daten: bytes) -> tuple[np.ndarray, float, float]:
@@ -120,7 +133,7 @@ def neuester_lauf() -> str:
     kandidaten = []
     for hh in range(0, 24, 3):
         try:
-            text = laden(f"{QUELLE}/{hh:02d}/clc/").decode()
+            text = laden(f"{QUELLE}/{hh:02d}/clc/", warten_404=0).decode()
         except Exception:
             continue
         for lauf in set(re.findall(r"model-level_(\d{10})_048_65_clc", text)):
