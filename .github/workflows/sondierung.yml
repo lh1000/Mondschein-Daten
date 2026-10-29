@@ -3,6 +3,11 @@ name: Quellen sondieren
 
 on:
   workflow_dispatch:
+    inputs:
+      nur:
+        description: "Nur ein Teil, z. B. dwd (DWD-Umstellung prüfen)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -16,4 +21,4 @@ jobs:
         with:
           fetch-depth: 1
       - name: Quellen abfragen
-        run: python3 sondierung/sondierung.py
+        run: python3 sondierung/sondierung.py ${{ inputs.nur }}

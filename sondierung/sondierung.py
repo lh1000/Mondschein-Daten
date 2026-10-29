@@ -32,7 +32,44 @@ def pruefe(name: str, url: str, bytes_: int = BYTES) -> bytes:
         return b""
 
 
+def verzeichnis(name: str, url: str, zeilen: int = 40) -> str:
+    """Verzeichnisliste (HTML) als Text: Einträge mit Datum, gekürzt."""
+    daten = pruefe(name, url, 1 << 20).decode("utf-8", "replace")
+    eintraege = re.findall(r'<a href="([^"]+)">[^<]*</a>\s*([^<\n]*)', daten)
+    for href, rest in eintraege[:zeilen]:
+        print(f"     {href:60s} {rest.strip()}")
+    if len(eintraege) > zeilen:
+        print(f"     … {len(eintraege) - zeilen} weitere")
+    return daten
+
+
+def dwd() -> None:
+    """DWD-Umstellung prüfen (Hinweis: alter Pfad icon-d2/grib endet nach dem 30.11.2026?)."""
+    alt = "https://opendata.dwd.de/weather/nwp/icon-d2/grib/"
+    verzeichnis("DWD weather/nwp", "https://opendata.dwd.de/weather/nwp/")
+    liste = verzeichnis("DWD icon-d2/grib (alt)", alt)
+    laeufe = sorted(set(re.findall(r'href="(\d\d)/"', liste)))
+    if laeufe:
+        verzeichnis(f"DWD alt Lauf {laeufe[-1]}", f"{alt}{laeufe[-1]}/")
+        verzeichnis(f"DWD alt clc {laeufe[-1]}", f"{alt}{laeufe[-1]}/clc/", 8)
+    v1 = verzeichnis("DWD v1", "https://opendata.dwd.de/weather/nwp/v1/")
+    if v1:
+        verzeichnis("DWD v1/m", "https://opendata.dwd.de/weather/nwp/v1/m/")
+        d2 = verzeichnis("DWD v1/m/icon-d2", "https://opendata.dwd.de/weather/nwp/v1/m/icon-d2/")
+        unter = re.findall(r'href="([^"./][^"]*/)"', d2)
+        for u in unter[:3]:
+            verzeichnis(f"DWD v1/m/icon-d2/{u}", f"https://opendata.dwd.de/weather/nwp/v1/m/icon-d2/{u}", 30)
+    # Hinweise/Ankündigungen im Wurzelverzeichnis
+    wurzel = verzeichnis("DWD Wurzel", "https://opendata.dwd.de/", 60)
+    for datei in re.findall(r'href="([^"]*(?:README|readme|news|NEWS|Hinweis|hinweis)[^"]*)"', wurzel):
+        print(pruefe(f"DWD {datei}", f"https://opendata.dwd.de/{datei}", 1 << 16).decode("utf-8", "replace")[:3000])
+
+
 def main() -> None:
+    import sys
+    if "dwd" in sys.argv[1:]:
+        dwd()
+        return
     pruefe("BEV ALS DTM (COG)", "https://data.bev.gv.at/download/ALS/DTM/20250915/ALS_DTM_CRS3035RES50000mN2650000E4400000.tif")
     meta = pruefe("Bayern DGM1 Metalink", "https://geodaten.bayern.de/odd/a/dgm/dgm1/meta/metalink/09.meta4", 2 << 20)
     kachel = re.search(rb'<file name="(\d+_\d+\.tif)">', meta)
