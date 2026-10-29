@@ -160,7 +160,9 @@ def main() -> int:
         liste["dateien"].append(eintrag)
         print(f" {eintrag['groesse'] / 1e6:.0f} MB" + (" – neu" if name in neu else " – unverändert"))
     benutzt = {r for d in liste["dateien"] for r in d["regionen"]}
-    liste["regionen"] = [{"id": r["id"], "name": r["name"]} for r in alle if r["id"] in benutzt]
+    # Mit Grenzen: Gebiete „online“ (Meilenstein 32) braucht die App ohne geladene Kartendatei
+    liste["regionen"] = [{k: r[k] for k in ("id", "name", "sued", "nord", "west", "ost") if k in r}
+                         for r in alle if r["id"] in benutzt]
     ausgabe = args.daten / "daten.json"
     ausgabe.write_text(json.dumps(liste, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"{ausgabe} geschrieben")
