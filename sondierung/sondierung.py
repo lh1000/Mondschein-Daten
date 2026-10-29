@@ -59,6 +59,25 @@ def dwd() -> None:
         unter = re.findall(r'href="([^"./][^"]*/)"', d2)
         for u in unter[:3]:
             verzeichnis(f"DWD v1/m/icon-d2/{u}", f"https://opendata.dwd.de/weather/nwp/v1/m/icon-d2/{u}", 30)
+    # Neuer Pfad tiefer: CLC bis zu den Dateien (Gitterarten?)
+    pfad = "https://opendata.dwd.de/weather/nwp/v1/m/icon-d2/p/CLC/"
+    for _ in range(6):
+        liste = verzeichnis(f"DWD {pfad[37:]}", pfad, 12)
+        unter = [u for u in re.findall(r'href="([^"./][^"]*/)"', liste)]
+        if not unter:
+            break
+        pfad += unter[-1]
+    # Alte Dateien: gibt es noch das regelmäßige Gitter?
+    if laeufe:
+        liste = pruefe("DWD alt clc (ganz)", f"{alt}{laeufe[-1]}/clc/", 4 << 20).decode("utf-8", "replace")
+        print("     regular-lat-lon:", liste.count("regular-lat-lon"), " icosahedral:", liste.count("icosahedral"))
+    # Newsletter (RSS): Einträge zu ICON-D2, Abschaltung, Umstellung
+    rss = pruefe("DWD Newsletter RSS", "https://www.dwd.de/SiteGlobals/Functions/RSSFeed/DE/opendata/opendata_lsb.xml", 4 << 20).decode("utf-8", "replace")
+    for titel, text in re.findall(r"<item>.*?<title>(.*?)</title>.*?<description>(.*?)</description>", rss, re.S)[:25]:
+        print("  RSS:", titel.strip()[:150])
+        t = re.sub(r"<[^>]+>|&lt;[^&]*&gt;", " ", text)
+        if re.search(r"icon-d2|ICON-D2|regular|abgeschaltet|eingestellt|v1|30\.11|November", t):
+            print("       ", re.sub(r"\s+", " ", t)[:1200])
     # Hinweise/Ankündigungen im Wurzelverzeichnis
     wurzel = verzeichnis("DWD Wurzel", "https://opendata.dwd.de/", 60)
     for datei in re.findall(r'href="([^"]*(?:README|readme|news|NEWS|Hinweis|hinweis)[^"]*)"', wurzel):
