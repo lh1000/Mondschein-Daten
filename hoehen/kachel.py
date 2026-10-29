@@ -64,7 +64,7 @@ def kachelgebiet(name: str, g: dict) -> tuple[hm.Gebiet, int]:
     return gebiet, 3 if breite < g["fein_bis"] else 1
 
 
-def kachel(name: str, ausgabe: Path, arbeitsordner: Path, cache: Path) -> None:
+def kachel(name: str, ausgabe: Path, arbeitsordner: Path, cache: Path, quellen: set[str] = frozenset({"bev", "bayern", "schweiz"})) -> None:
     g = gebiete()
     gebiet, teilung = kachelgebiet(name, g)
     faktor = 10
@@ -73,9 +73,12 @@ def kachel(name: str, ausgabe: Path, arbeitsordner: Path, cache: Path) -> None:
     print(f"{name}: {gebiet}, {gitter.zeilen} × {gitter.spalten} Punkte ({'1/3' if teilung == 3 else '1'}″), "
           f"Platz frei {amtlich.freier_platz(arbeitsordner):.0f} GB")
     summen = amtlich.Summen(arbeitsordner, name, gitter)
-    amtlich.oesterreich(summen, aufloesung=2 if teilung == 3 else 8)
-    amtlich.bayern(summen, arbeitsordner)
-    amtlich.schweiz(summen)
+    if "bev" in quellen:
+        amtlich.oesterreich(summen, aufloesung=2 if teilung == 3 else 8)
+    if "bayern" in quellen:
+        amtlich.bayern(summen, arbeitsordner)
+    if "schweiz" in quellen:
+        amtlich.schweiz(summen)
     hoehen = open_memmap(arbeitsordner / f"{name}_dm.npy", mode="w+", dtype=np.int16, shape=(gitter.zeilen, gitter.spalten))
     luecken = amtlich.mittelwert_in_bloecken(summen, hoehen, faktor)
     gesamt = gitter.zeilen * gitter.spalten
@@ -107,12 +110,13 @@ def main() -> int:
     p.add_argument("--ausgabe", type=Path, required=True)
     p.add_argument("--arbeitsordner", type=Path, default=Path("arbeit"))
     p.add_argument("--cache", type=Path, default=Path("copernicus"))
+    p.add_argument("--quellen", default="bev,bayern,schweiz", help="amtliche Quellen, z. B. bev,schweiz (Rest: Copernicus)")
     a = p.parse_args()
     beginn = time.time()
     if a.puffer:
         puffer(a.puffer, a.ausgabe, a.cache)
     else:
-        kachel(a.kachel, a.ausgabe, a.arbeitsordner, a.cache)
+        kachel(a.kachel, a.ausgabe, a.arbeitsordner, a.cache, set(a.quellen.split(",")))
     print(f"fertig nach {(time.time() - beginn) / 60:.0f} min")
     return 0
 
