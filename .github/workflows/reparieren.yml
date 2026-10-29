@@ -10,7 +10,7 @@ on:
         description: "Dateimuster im Release, z. B. mondschein-hoehen-puffer-*"
         default: "mondschein-hoehen-puffer-*"
       tag:
-        description: "Release, aus dem die Dateien kommen (leer = heutiger Datenstand)"
+        description: "Release, aus dem die Dateien kommen (leer = neuester Datenstand)"
         default: ""
       lauf:
         description: "Optional: ID eines früheren Workflow-Laufs, dessen Artefakte mit veröffentlicht werden"
@@ -45,7 +45,8 @@ jobs:
           merge-multiple: true
       - name: Dateien aus dem Release laden und neu veröffentlichen
         run: |
-          tag="${TAG:-daten-$(date -u +%F)}"
+          # Ohne Angabe der neueste Datenstand (nicht das heutige Datum: nach Mitternacht UTC gibt es den noch nicht)
+          tag="${TAG:-$(gh release view --repo ${{ github.repository }} --json tagName -q .tagName)}"
           mkdir -p daten
           gh release download "$tag" --repo ${{ github.repository }} --pattern "$MUSTER" --dir daten --skip-existing
           ls -la daten
