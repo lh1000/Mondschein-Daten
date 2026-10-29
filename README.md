@@ -31,6 +31,10 @@ gemittelt bzw. maximiert, in Kacheln umgewandelt):
   DGM1, Lizenz [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de), verändert.
 - **Copernicus DEM GLO-30:** © DLR e.V. 2010–2014 und © Airbus Defence and Space GmbH 2014–2018, bereitgestellt
   im Rahmen von COPERNICUS durch die Europäische Union und die ESA.
+- **Höhendaten Schweiz und Liechtenstein:** swissALTI3D © swisstopo (Open Government Data), verändert (gemittelt).
+- **Regionen der Gebietserweiterung** (`mondschein-<art>-<region>.*`, Höhenkacheln `mondschein-hoehen-N47E010.bin`):
+  dieselben Quellen; Grundkarten als Protomaps-Ausschnitte, Wege und Wander-Ebene aus OpenStreetMap
+  (Geofabrik-Extrakte, ODbL 1.0); wo keine amtlichen Höhendaten genutzt werden, Copernicus DEM GLO-30.
 - **Wald (`mondschein-wald.bin`):** Canopy height: Meta and World Resources Institute (2026), CHMv2,
   Lizenz [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de), verändert (Lückenquote und Kronenhöhe je
   1/3″-Zelle). Blatttyp, falls enthalten: Generated using European Union's Copernicus Land Monitoring Service
