@@ -37,7 +37,10 @@ jobs:
       - name: Neuester Lauf schon veröffentlicht?
         id: pruefen
         run: |
-          neu=$(python wetter/icon_d2.py --nur-lauf)
+          # Neues DWD-Schema (v1); bis zur Abschaltung des alten (30.11.2026) springt dieses bei Fehlern ein
+          quelle=v1
+          neu=$(python wetter/icon_d2.py --nur-lauf --quelle v1) || { quelle=alt; neu=$(python wetter/icon_d2.py --nur-lauf --quelle alt); }
+          echo "quelle=$quelle" >> "$GITHUB_OUTPUT"
           alt=$(gh release download wolken --pattern wolken.json --output - 2>/dev/null \
                 | python -c "import json,sys; print(json.load(sys.stdin)['lauf'])" 2>/dev/null || true)
           echo "Neuester Lauf: $neu, veröffentlicht: ${alt:-keiner}"
@@ -46,7 +49,10 @@ jobs:
 
       - name: Aufbereiten
         if: steps.pruefen.outputs.fertig != 'ja'
-        run: python -W ignore wetter/icon_d2.py --lauf "${{ steps.pruefen.outputs.lauf }}" --ziel mondschein-wolken.bin --json wolken.json
+        run: |
+          lauf="${{ steps.pruefen.outputs.lauf }}"
+          python -W ignore wetter/icon_d2.py --quelle "${{ steps.pruefen.outputs.quelle }}" --lauf "$lauf" --ziel mondschein-wolken.bin --json wolken.json \
+            || python -W ignore wetter/icon_d2.py --quelle alt --lauf "$lauf" --ziel mondschein-wolken.bin --json wolken.json
 
       - name: Veröffentlichen
         if: steps.pruefen.outputs.fertig != 'ja'

@@ -5,11 +5,11 @@ Lädt einen Modelllauf von opendata.dwd.de (3D-Wolkenanteil `clc` auf Modellflä
 der die App die Wolken entlang der Sichtlinie offline liest (docs/mathe.md, Abschnitt 10).
 
 Quellen (--quelle):
-    v1   neues URL-Schema weather/nwp/v1/m/icon-d2, nur das ICON-Dreiecksgitter (542 040 Zellen).
+    v1   (Standard) neues URL-Schema weather/nwp/v1/m/icon-d2, nur das ICON-Dreiecksgitter (542 040 Zellen).
          Jeder Knoten des 0,02°-Gitters nimmt den Wert der nächsten Dreieckszelle (Lage aus CLAT/CLON
          des Laufs); weiter als 3 km von jeder Zelle: fehlt. Seit 30.10.2026, weil der DWD das alte
          Schema nach dem 30.11.2026 abschaltet.
-    alt  (Standard bis zur Prüfung) bisheriges Schema weather/nwp/icon-d2/grib, regelmäßiges 0,02°-Gitter (bz2).
+    alt  bisheriges Schema weather/nwp/icon-d2/grib, regelmäßiges 0,02°-Gitter (bz2).
 
 Aufruf:
     python icon_d2.py --ziel ..\\..\\..\\Daten\\wolken\\mondschein-wolken.bin [--lauf 2026102606] [--stunden 48]
@@ -295,7 +295,7 @@ def main() -> None:
     p.add_argument("--lauf", help="z. B. 2026102606; ohne Angabe der neueste vollständige Lauf")
     p.add_argument("--stunden", type=int, default=48, help="letzte Vorhersagestunde (ICON-D2: bis 48)")
     p.add_argument("--parallel", type=int, default=16)
-    p.add_argument("--quelle", choices=("v1", "alt"), default="alt", help="URL-Schema des DWD (alt endet nach dem 30.11.2026)")
+    p.add_argument("--quelle", choices=("v1", "alt"), default="v1", help="URL-Schema des DWD (alt endet nach dem 30.11.2026)")
     a = p.parse_args()
 
     beginn = time.time()
