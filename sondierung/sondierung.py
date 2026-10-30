@@ -204,8 +204,38 @@ def hoehen3() -> None:
         print(f"     {len(d)} Byte, Anfang {d[:8]!r}")
 
 
+def hoehen4() -> None:
+    """Dritte Runde Meilenstein 40: LGL-Produktliste, Lückenwerte bei IGN und PDOK."""
+    for pfad in ("assets/config/local/odp-products.json", "assets/environment/config.json"):
+        text = pruefe(f"LGL {pfad}", f"https://opengeodata.lgl-bw.de/{pfad}", 4 << 20).decode("utf-8", "replace")
+        for m in re.finditer(r"dgm", text, re.I):
+            print("     …" + re.sub(r"\s+", " ", text[max(0, m.start() - 300):m.start() + 400]) + "…")
+            break
+        for u in sorted(set(re.findall(r'https?://[^"\s]+', text)))[:30]:
+            print(f"     {u}")
+    import numpy as np
+    from rasterio.io import MemoryFile
+    for name, b, l in (("Freiburg (DE)", 48.0, 7.85), ("Colmar (FR)", 48.08, 7.35), ("Rhein", 48.2, 7.6)):
+        url = ("https://data.geopf.fr/wms-r?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES"
+               f"&STYLES=&CRS=EPSG:4326&BBOX={b},{l},{b + 0.01},{l + 0.01}&WIDTH=50&HEIGHT=50&FORMAT=image/geotiff")
+        with MemoryFile(pruefe(f"IGN {name}", url, 1 << 20)) as m, m.open() as d:
+            a = d.read(1)
+            print(f"     dtype {a.dtype}, nodata {d.nodata}, crs {d.crs}, min {a.min()}, max {a.max()}, Werte {np.unique(a)[:5]}")
+    url = ("https://service.pdok.nl/rws/ahn/wcs/v1_0?SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCoverage&COVERAGEID=dtm_05m"
+           "&FORMAT=image/tiff&SUBSET=x(120000,125000)&SUBSET=y(487000,492000)&SCALESIZE=x(500),y(500)")
+    with MemoryFile(pruefe("PDOK", url, 8 << 20)) as m, m.open() as d:
+        a = d.read(1)
+        print(f"     dtype {a.dtype}, nodata {d.nodata}, crs {d.crs}, transform {d.transform}, Anteil Lücken {(a == d.nodata).mean() if d.nodata is not None else np.isnan(a).mean():.2f}")
+    url = "https://dgm1.s3.eu-de.cloud-object-storage.appdomain.cloud/L2002/Vollkacheln/dgm1_32_468_5930_1_ni_2020.tif"
+    with MemoryFile(pruefe("LGLN Kachel", url, 32 << 20)) as m, m.open() as d:
+        print(f"     {d.width}×{d.height}, dtype {d.dtypes[0]}, nodata {d.nodata}, crs {d.crs}, Übersichten {d.overviews(1)}, Blöcke {d.block_shapes}")
+
+
 def main() -> None:
     import sys
+    if "hoehen4" in sys.argv[1:]:
+        hoehen4()
+        return
     if "hoehen3" in sys.argv[1:]:
         hoehen3()
         return

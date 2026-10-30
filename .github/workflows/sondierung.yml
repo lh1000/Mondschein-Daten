@@ -24,6 +24,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Abhängigkeiten
-        run: pip install -r wetter/requirements.txt
+        run: pip install -r wetter/requirements.txt rasterio
       - name: Quellen abfragen
         run: python3 sondierung/sondierung.py ${{ inputs.nur }}
