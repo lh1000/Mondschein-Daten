@@ -13,6 +13,10 @@ on:
         description: "Als Datenstand veröffentlichen (sonst nur als Artefakte)"
         type: boolean
         default: true
+      wald:
+        description: "Auch die Walddatei neu rechnen (sonst bleibt die bisherige)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -67,6 +71,7 @@ jobs:
             --gebiet "$(python3 karte/region.py sued-nord "$REGION" 0.25)" \
             --ausgabe "daten/mondschein-wege-$REGION.bin" --stand "$(date -u +%F)"
       - name: Wald
+        if: ${{ inputs.wald }}
         run: |
           rm -rf osm hoehen-kacheln
           python wald/wald.py --wege "daten/mondschein-wege-$REGION.bin" --ausgabe "daten/mondschein-wald-$REGION.bin" \

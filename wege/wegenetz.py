@@ -160,6 +160,22 @@ GIPFEL, SATTEL, AUSSICHT, ORT_HUETTE = range(4)
 ORTSNAME = {GIPFEL: "Gipfel", SATTEL: "Sattel", AUSSICHT: "Aussichtspunkt", ORT_HUETTE: "Hütte"}
 HOEHE_UNBEKANNT = -2**31
 
+# Merkmale eines Orts (Byte nach der Art, früher Füllbyte 0; Meilenstein 38): Gipfelkreuz laut OSM
+ORT_KREUZ = 1
+
+# Ein eigener Kreuz-Knoten (man_made=cross) gehört zum nächsten Gipfel im Umkreis von 80 m (wie wandern.py)
+KREUZ_ABSTAND = 80.0
+
+
+def gipfelkreuz(tags) -> bool:
+    """Gipfelkreuz am Gipfel selbst (summit:cross=yes|cross)."""
+    return tags.get("summit:cross") in ("yes", "cross")
+
+
+def ist_kreuz(tags) -> bool:
+    """Eigener Kreuz-Knoten (man_made=cross), z. B. neben dem Gipfelpunkt."""
+    return tags.get("man_made") == "cross" or tags.get("summit:cross") == "yes" and tags.get("natural") not in ("peak", "volcano")
+
 
 def ortsart(tags) -> int | None:
     """Gipfel und Sättel nur mit Namen (sonst zu viele), Aussichtspunkte und Hütten immer."""
@@ -217,8 +233,10 @@ class Sammler(osmium.SimpleHandler):
         self.bergbahn: list[np.ndarray] = []  # Punkte (Breite, Länge) von Zahnrad- und Standseilbahnen
         # Autostraßen: Knoten-IDs, Breite, Länge, frei, Maut, zeitweise gesperrt
         self.auto: list[tuple[np.ndarray, np.ndarray, np.ndarray, bool, bool, bool]] = []
-        # Orte mit Aussicht: Breite, Länge, Art, Name, OSM-Höhe (oder None)
-        self.orte: dict[tuple[str, int], tuple[float, float, int, str, float | None]] = {}
+        # Orte mit Aussicht: Breite, Länge, Art, Name, OSM-Höhe (oder None), Merkmale (ORT_KREUZ)
+        self.orte: dict[tuple[str, int], tuple[float, float, int, str, float | None, int]] = {}
+        # Eigene Kreuz-Knoten (Breite, Länge), später dem nächsten Gipfel zugeordnet
+        self.kreuze: list[tuple[float, float]] = []
 
     def innen(self, b: float, l: float) -> bool:
         return self.g.sued <= b <= self.g.nord and self.g.west <= l <= self.g.ost
@@ -226,7 +244,10 @@ class Sammler(osmium.SimpleHandler):
     def node(self, n):
         ort = ortsart(n.tags)
         if ort is not None and n.location.valid() and self.innen(n.location.lat, n.location.lon):
-            self.orte[("n", n.id)] = (n.location.lat, n.location.lon, ort, n.tags.get("name", ""), ele(n.tags))
+            merkmale = ORT_KREUZ if ort == GIPFEL and gipfelkreuz(n.tags) else 0
+            self.orte[("n", n.id)] = (n.location.lat, n.location.lon, ort, n.tags.get("name", ""), ele(n.tags), merkmale)
+        elif ist_kreuz(n.tags) and n.location.valid():
+            self.kreuze.append((n.location.lat, n.location.lon))
         art = startart(n.tags)
         if art is None or not n.location.valid() or not self.innen(n.location.lat, n.location.lon):
             return
@@ -264,7 +285,7 @@ class Sammler(osmium.SimpleHandler):
                 b0 = sum(p[0] for p in punkte) / len(punkte)
                 l0 = sum(p[1] for p in punkte) / len(punkte)
                 if self.innen(b0, l0):
-                    self.orte[("w", w.id)] = (b0, l0, ort, w.tags.get("name", ""), ele(w.tags))
+                    self.orte[("w", w.id)] = (b0, l0, ort, w.tags.get("name", ""), ele(w.tags), 0)
         start = startart(w.tags) if art is None else None
         if art is None and start is None:
             return
@@ -288,6 +309,23 @@ class Sammler(osmium.SimpleHandler):
         self.wege[w.id] = Weg(ids, b, l, art, SAC.get(w.tags.get("sac_scale"), 0),
                               SICHT.get(w.tags.get("trail_visibility"), 0),
                               w.tags.get("name") or w.tags.get("ref") or "")
+
+
+def kreuze_zuordnen(sammler: "Sammler") -> None:
+    """Eigene Kreuz-Knoten dem nächsten Gipfel mit Namen im Umkreis von KREUZ_ABSTAND zuordnen."""
+    gipfel = [(k, o) for k, o in sammler.orte.items() if o[2] == GIPFEL]
+    if not gipfel or not sammler.kreuze:
+        return
+    b0 = math.radians(sum(o[0] for _, o in gipfel) / len(gipfel))
+    meter = 111_320.0
+    punkte = np.array([(o[0] * meter, o[1] * meter * math.cos(b0)) for _, o in gipfel])
+    baum = cKDTree(punkte)
+    kreuze = np.array([(b * meter, l * meter * math.cos(b0)) for b, l in sammler.kreuze])
+    abstand, index = baum.query(kreuze, distance_upper_bound=KREUZ_ABSTAND)
+    for d, i in zip(abstand, index):
+        if math.isfinite(d):
+            k, o = gipfel[i]
+            sammler.orte[k] = o[:5] + (o[5] | ORT_KREUZ,)
 
 
 class Hoehen:
@@ -572,12 +610,16 @@ def main() -> int:
 
     # Orte mit Aussicht (Meilenstein 18b): Abschnitt nach den Namen, im Kopf ab Byte 36 angekündigt;
     # ältere Leser überspringen ihn
+    kreuze_zuordnen(sammler)
     orte_bytes = bytearray()
-    for b, l, art, name, hoehe in sammler.orte.values():
+    for b, l, art, name, hoehe, merkmale in sammler.orte.values():
         z = HOEHE_UNBEKANNT if hoehe is None else halb(hoehe * 10)
-        orte_bytes += struct.pack("<iiiiB3x", halb(b * MIKRO), halb(l * MIKRO), z, name_index(name or ORTSNAME[art]), art)
+        # Byte 17: Merkmale (Meilenstein 38); ältere Leser sehen dort das bisherige Füllbyte
+        orte_bytes += struct.pack("<iiiiBB2x", halb(b * MIKRO), halb(l * MIKRO), z, name_index(name or ORTSNAME[art]), art,
+                                  merkmale)
     orte_anzahl = len(sammler.orte)
-    print(f"  {orte_anzahl} Orte mit Aussicht")
+    mit_kreuz = sum(1 for o in sammler.orte.values() if o[5] & ORT_KREUZ)
+    print(f"  {orte_anzahl} Orte mit Aussicht, davon {mit_kreuz} Gipfel mit Kreuz")
 
     stand = a.stand or dt.date.fromtimestamp(a.pbf[0].stat().st_mtime).isoformat()
     n = len(graph_ids)
