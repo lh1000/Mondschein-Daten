@@ -123,6 +123,10 @@ def dwd2() -> None:
 
 def main() -> None:
     import sys
+    if "vergleich" in sys.argv[1:]:
+        import subprocess
+        subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "dwd_vergleich.py")], check=True)
+        return
     if "dwd2" in sys.argv[1:]:
         dwd2()
         return

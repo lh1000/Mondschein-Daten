@@ -1,8 +1,15 @@
 """Wolkendatei aus dem DWD-Modell ICON-D2 für die App (docs/konzept.md, Meilenstein 14).
 
 Lädt einen Modelllauf von opendata.dwd.de (3D-Wolkenanteil `clc` auf Modellflächen und deren Höhen
-`hhl`, regelmäßiges 0,02°-Gitter), schneidet das Gebiet aus und schreibt eine kompakte Datei, aus der
-die App die Wolken entlang der Sichtlinie offline liest (docs/mathe.md, Abschnitt 10).
+`hhl`), bringt ihn auf das 0,02°-Gitter, schneidet das Gebiet aus und schreibt eine kompakte Datei, aus
+der die App die Wolken entlang der Sichtlinie offline liest (docs/mathe.md, Abschnitt 10).
+
+Quellen (--quelle):
+    v1   (Standard) neues URL-Schema weather/nwp/v1/m/icon-d2, nur das ICON-Dreiecksgitter (542 040 Zellen).
+         Jeder Knoten des 0,02°-Gitters nimmt den Wert der nächsten Dreieckszelle (Lage aus CLAT/CLON
+         des Laufs); weiter als 3 km von jeder Zelle: fehlt. Seit 30.10.2026, weil der DWD das alte
+         Schema nach dem 30.11.2026 abschaltet.
+    alt  bisheriges Schema weather/nwp/icon-d2/grib, regelmäßiges 0,02°-Gitter (bz2).
 
 Aufruf:
     python icon_d2.py --ziel ..\\..\\..\\Daten\\wolken\\mondschein-wolken.bin [--lauf 2026102606] [--stunden 48]
@@ -50,6 +57,10 @@ import eccodes
 import numpy as np
 
 QUELLE = "https://opendata.dwd.de/weather/nwp/icon-d2/grib"
+QUELLE_V1 = "https://opendata.dwd.de/weather/nwp/v1/m/icon-d2/p"
+
+# Dreiecksgitter: weiter als so weit (km) von der nächsten Zelle gilt ein Gitterknoten als außerhalb
+NAECHSTE_MAX_KM = 3.0
 KENNUNG = b"MSWOLKE1"
 
 # Globales 0,02°-Gitter, wie Wettergitter in core/ (Index = round(Grad / 0,02))
@@ -149,6 +160,73 @@ def datei_url(lauf: str, groesse: str, stunde: int, flaeche: int) -> str:
     return f"{QUELLE}/{hh}/{groesse}/icon-d2_germany_regular-lat-lon_{art}_{lauf}_{stunde:03d}_{flaeche}_{groesse}.grib2.bz2"
 
 
+def v1_lauf(lauf: str) -> str:
+    """„2026103006“ → Ordnername des Laufs im neuen Schema („2026-10-30T06%3A00“)."""
+    return f"{lauf[0:4]}-{lauf[4:6]}-{lauf[6:8]}T{lauf[8:10]}%3A00"
+
+
+def v1_url(param: str, lauf: str, stunde: int, flaeche: int | None) -> str:
+    ebene = f"/lvt1/150/lv1/{flaeche}" if flaeche is not None else ""
+    return f"{QUELLE_V1}/{param}{ebene}/r/{v1_lauf(lauf)}/s/PT{stunde:03d}H00M.grib2"
+
+
+def grib_werte(daten: bytes) -> np.ndarray:
+    """Werte einer GRIB2-Nachricht ohne Gitterangaben (Dreiecksgitter), fehlende als FEHLWERT."""
+    with ENTSCHLUESSELN:
+        g = eccodes.codes_new_from_message(daten)
+        try:
+            eccodes.codes_set(g, "missingValue", FEHLWERT)
+            return eccodes.codes_get_values(g)
+        finally:
+            eccodes.codes_release(g)
+
+
+def v1_neuester_lauf() -> str:
+    """Neuester Lauf im neuen Schema, dessen Stunde 48 der untersten Fläche schon bereitliegt."""
+    text = laden(f"{QUELLE_V1}/CLC/lvt1/150/lv1/65/r/", warten_404=0).decode()
+    laeufe = sorted(set(re.findall(r'href="(\d{4})-(\d{2})-(\d{2})T(\d{2})%3A00/"', text)), reverse=True)
+    for j, m, t, h in laeufe:
+        lauf = f"{j}{m}{t}{h}"
+        try:
+            liste = laden(f"{QUELLE_V1}/CLC/lvt1/150/lv1/65/r/{v1_lauf(lauf)}/s/", warten_404=0).decode()
+        except Exception:
+            continue
+        if "PT048H00M.grib2" in liste:
+            return lauf
+    sys.exit("Kein vollständiger ICON-D2-Lauf gefunden (neues Schema)")
+
+
+class Dreiecksgitter:
+    """Lage der ICON-D2-Zellen eines Laufs (CLAT/CLON) und je Ebene der Index der nächsten Zelle je Knoten."""
+
+    def __init__(self, lauf: str):
+        from scipy.spatial import cKDTree
+        b = grib_werte(laden(v1_url("CLAT", lauf, 0, None)))
+        l = grib_werte(laden(v1_url("CLON", lauf, 0, None)))
+        # CLAT/CLON in Grad; falls in Radiant geliefert, umrechnen
+        if np.nanmax(np.abs(b)) <= math.pi:
+            b, l = np.degrees(b), np.degrees(l)
+        self.b0 = math.radians(float(np.mean(b)))
+        self.baum = cKDTree(self._xy(b, l))
+        self.anzahl = len(b)
+
+    def _xy(self, b: np.ndarray, l: np.ndarray) -> np.ndarray:
+        return np.column_stack([b * 111.32, l * 111.32 * math.cos(self.b0)])
+
+    def index(self, e: "Ebene") -> np.ndarray:
+        """Index der nächsten Zelle je 0,02°-Knoten der Ebene, −1 wenn weiter als NAECHSTE_MAX_KM."""
+        b, l = e.knoten()
+        d, i = self.baum.query(self._xy(b.ravel(), l.ravel()))
+        i = np.where(d <= NAECHSTE_MAX_KM, i, -1)
+        return i.reshape(b.shape)
+
+
+def auf_ebene(werte: np.ndarray, index: np.ndarray) -> np.ndarray:
+    """Werte des Dreiecksgitters auf die Knoten einer Ebene (fehlende Zellen als FEHLWERT)."""
+    aus = np.where(index >= 0, werte[np.clip(index, 0, None)], FEHLWERT)
+    return aus
+
+
 class Ebene:
     """Ausschnitt des Gitters mit Schritt 1 (0,02°) oder 2 (0,04°), ausgerichtet am globalen Gitter."""
 
@@ -160,6 +238,13 @@ class Ebene:
         self.zeilen = (int(round(nord / WEITE)) - self.i0) // schritt + 1
         self.spalten = (int(round(ost / WEITE)) - self.j0) // schritt + 1
 
+    def knoten(self) -> tuple[np.ndarray, np.ndarray]:
+        """Breite und Länge (Grad) aller 0,02°-Knoten der Ebene, [Zeile][Spalte] (bei Schritt 2 alle 2 × 2)."""
+        s = self.schritt
+        b = (self.i0 + np.arange(self.zeilen * s)) * WEITE
+        l = (self.j0 + np.arange(self.spalten * s)) * WEITE
+        return np.meshgrid(b, l, indexing="ij")
+
     def ausschneiden(self, feld: np.ndarray, lat0: float, lon0: float, mittel: bool) -> np.ndarray:
         """Ausschnitt aus dem DWD-Feld; bei Schritt 2 Mittel über 2 × 2 Zellen (fehlende Werte als NaN)."""
         di = self.i0 - int(round(lat0 / WEITE))
@@ -168,6 +253,12 @@ class Ebene:
         teil = feld[di:di + self.zeilen * s, dj:dj + self.spalten * s].astype(np.float64)
         if teil.shape != (self.zeilen * s, self.spalten * s):
             sys.exit("Gebiet liegt nicht ganz im ICON-D2-Gitter")
+        return self.zusammenfassen(teil, mittel)
+
+    def zusammenfassen(self, teil: np.ndarray, mittel: bool) -> np.ndarray:
+        """Feld auf den 0,02°-Knoten der Ebene → Zellen der Ebene (bei Schritt 2 Mittel bzw. erster Knoten)."""
+        s = self.schritt
+        teil = teil.astype(np.float64)
         teil[teil >= FEHLWERT] = np.nan
         if s == 1:
             return teil
@@ -204,26 +295,45 @@ def main() -> None:
     p.add_argument("--lauf", help="z. B. 2026102606; ohne Angabe der neueste vollständige Lauf")
     p.add_argument("--stunden", type=int, default=48, help="letzte Vorhersagestunde (ICON-D2: bis 48)")
     p.add_argument("--parallel", type=int, default=16)
+    p.add_argument("--quelle", choices=("v1", "alt"), default="v1", help="URL-Schema des DWD (alt endet nach dem 30.11.2026)")
     a = p.parse_args()
 
     beginn = time.time()
-    lauf = a.lauf or neuester_lauf()
+    v1 = a.quelle == "v1"
+    lauf = a.lauf or (v1_neuester_lauf() if v1 else neuester_lauf())
     if a.nur_lauf:
         print(lauf)
         return
     if a.ziel is None:
         p.error("--ziel fehlt")
-    print(f"Lauf {lauf}", flush=True)
+    print(f"Lauf {lauf} (Quelle {a.quelle})", flush=True)
     ebenen = kacheln()
     print(f"{len(ebenen)} Kacheln", flush=True)
     pool = ThreadPoolExecutor(a.parallel)
 
+    if v1:
+        gitter = Dreiecksgitter(lauf)
+        indizes = [gitter.index(e) for e in ebenen]
+        fehlend = sum(int((i < 0).sum()) for i in indizes)
+        print(f"Dreiecksgitter: {gitter.anzahl} Zellen, {fehlend} Knoten außerhalb", flush=True)
+
+        def feld(param: str, t: int, k: int):
+            return grib_werte(laden(v1_url(param, lauf, t, k)))
+
+        def ausschnitt(f, n: int, e: Ebene, mittel: bool) -> np.ndarray:
+            return e.zusammenfassen(auf_ebene(f, indizes[n]), mittel)
+    else:
+        def feld(param: str, t: int, k: int):
+            return grib_feld(laden(datei_url(lauf, param.lower(), t, k)))
+
+        def ausschnitt(f, n: int, e: Ebene, mittel: bool) -> np.ndarray:
+            return e.ausschneiden(f[0], f[1], f[2], mittel)
+
     # Höhen der 66 Halbflächen (feste Modellgeometrie); Flächenmitte = Mittel zweier Halbflächen
-    hhl = dict(zip(range(1, 67), pool.map(lambda k: grib_feld(laden(datei_url(lauf, "hhl", 0, k))), range(1, 67))))
+    hhl = dict(zip(range(1, 67), pool.map(lambda k: feld("HHL", 0, k), range(1, 67))))
     alle_flaechen = []
     for k in range(65, 0, -1):  # von unten nach oben
-        mitte = [(e.ausschneiden(hhl[k][0], hhl[k][1], hhl[k][2], True) + e.ausschneiden(hhl[k + 1][0], hhl[k + 1][1], hhl[k + 1][2], True)) / 2
-                 for e in ebenen]
+        mitte = [(ausschnitt(hhl[k], n, e, True) + ausschnitt(hhl[k + 1], n, e, True)) / 2 for n, e in enumerate(ebenen)]
         # Fehlen die Höhen (oberste Flächen) oder liegt die Fläche überall über der Wolkenobergrenze: fertig
         if any(np.isnan(m).all() for m in mitte) or min(np.nanmin(m) for m in mitte) > OBERGRENZE:
             break
@@ -240,10 +350,10 @@ def main() -> None:
     stunden = list(range(0, a.stunden + 1))
 
     def stunde_laden(t: int) -> list[bytes]:
-        felder = list(pool_innen.map(lambda k: grib_feld(laden(datei_url(lauf, "clc", t, k))), flaechen))
+        felder = list(pool_innen.map(lambda k: feld("CLC", t, k), flaechen))
         bloecke = []
-        for e in ebenen:
-            w = np.stack([e.ausschneiden(f, la, lo, True) for f, la, lo in felder], axis=-1)
+        for n, e in enumerate(ebenen):
+            w = np.stack([ausschnitt(f, n, e, True) for f in felder], axis=-1)
             u8 = np.where(np.isnan(w), FEHLT, np.clip(np.round(w / STUFE) * STUFE, 0, 100)).astype(np.uint8)
             bloecke.append(zlib.compress(u8.tobytes(), 9))
         print(f"  Stunde {t:2d} fertig", flush=True)
