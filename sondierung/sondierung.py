@@ -170,8 +170,45 @@ def hoehen2() -> None:
     links("LGLN Hub", "https://ni-lgln-opengeodata.hub.arcgis.com/", "dgm", 20)
 
 
+def hoehen3() -> None:
+    """Zweite Runde Meilenstein 40: Dateischema LGL BW, LGLN-STAC, PDOK-Skalierung, IGN-Bildgröße."""
+    print("--- LGL: Verweise im Programmcode der Seite")
+    seite = pruefe("LGL Startseite", "https://opengeodata.lgl-bw.de/", 1 << 20).decode("utf-8", "replace")
+    for js in sorted(set(re.findall(r'(?:src|href)="([^"]+\.js)"', seite))):
+        text = pruefe(f"LGL {js}", f"https://opengeodata.lgl-bw.de/{js}", 8 << 20).decode("utf-8", "replace")
+        for m in sorted(set(re.findall(r'["`\'][^"`\'\s]{0,80}(?:dgm|/data/|\.zip|\.tif|json)[^"`\'\s]{0,80}["`\']', text, re.I)))[:40]:
+            print(f"     {m}")
+    for u in ("https://opengeodata.lgl-bw.de/data/dgm/dgm1_32_400_5300_2_bw.zip",
+              "https://opengeodata.lgl-bw.de/data/dgm/index.json", "https://opengeodata.lgl-bw.de/assets/config.json"):
+        d = pruefe(f"LGL {u}", u, 1 << 16)
+        print(f"     Anfang {d[:120]!r}")
+    print("--- LGLN STAC")
+    links("LGLN Collections", "https://dgm.stac.lgln.niedersachsen.de/collections", "collections/", 20)
+    such = pruefe("LGLN Suche", "https://dgm.stac.lgln.niedersachsen.de/search?bbox=8.5,53.5,8.52,53.52&limit=3", 2 << 20).decode("utf-8", "replace")
+    try:
+        for f in json.loads(such)["features"]:
+            print(f"     {f['id']} {f.get('collection')}: " + ", ".join(f"{k}={a['href']}" for k, a in f["assets"].items()))
+    except Exception as fehler:  # noqa: BLE001
+        print(f"     {fehler}: {such[:500]}")
+    print("--- PDOK Skalierung")
+    for zusatz in ("&SCALEFACTOR=0.1", "&SCALESIZE=x(500),y(500)", "&SCALEAXES=x(0.1),y(0.1)"):
+        url = ("https://service.pdok.nl/rws/ahn/wcs/v1_0?SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCoverage&COVERAGEID=dtm_05m"
+               "&FORMAT=image/tiff&SUBSET=x(120000,125000)&SUBSET=y(487000,492000)" + zusatz)
+        d = pruefe(f"PDOK 5 km{zusatz}", url, 64 << 20)
+        print(f"     {len(d)} Byte, Anfang {d[:8]!r}")
+    print("--- IGN Bildgröße")
+    for n in (2048, 4096):
+        url = ("https://data.geopf.fr/wms-r?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES"
+               f"&STYLES=&CRS=EPSG:4326&BBOX=48.0,7.3,48.1,7.4&WIDTH={n}&HEIGHT={n}&FORMAT=image/geotiff")
+        d = pruefe(f"IGN {n}²", url, 80 << 20)
+        print(f"     {len(d)} Byte, Anfang {d[:8]!r}")
+
+
 def main() -> None:
     import sys
+    if "hoehen3" in sys.argv[1:]:
+        hoehen3()
+        return
     if "hoehen2" in sys.argv[1:]:
         hoehen2()
         return
