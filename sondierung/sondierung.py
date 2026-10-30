@@ -251,8 +251,28 @@ def hoehen5() -> None:
     print(json.dumps(finde(produkte), indent=1, ensure_ascii=False)[:6000])
 
 
+def hoehen6() -> None:
+    """LGL DGM1: Namensschema der 2-km-Kacheln ausprobieren (Stuttgart, ca. 513 km O, 5404 km N)."""
+    for e, n in ((512, 5404), (513, 5405), (512, 5405), (513, 5404), (400, 5300), (401, 5301), (488, 5368), (489, 5369)):
+        for name in (f"dgm1_32_{e}_{n}_2_bw.zip", f"dgm1_32{e}_{n}_2_bw.zip"):
+            u = f"https://opengeodata.lgl-bw.de/data/dgm/{name}"
+            d = pruefe(name, u, 1 << 16)
+            if d:
+                print(f"     Anfang {d[:80]!r}")
+                import io, zipfile
+                ganz = pruefe(name + " ganz", u, 64 << 20)
+                with zipfile.ZipFile(io.BytesIO(ganz)) as z:
+                    for i in z.infolist():
+                        print(f"     {i.filename} {i.file_size}")
+                        print("     " + repr(z.read(i.filename)[:200]))
+                return
+
+
 def main() -> None:
     import sys
+    if "hoehen6" in sys.argv[1:]:
+        hoehen6()
+        return
     if "hoehen5" in sys.argv[1:]:
         hoehen5()
         return
