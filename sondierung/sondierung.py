@@ -268,8 +268,34 @@ def hoehen6() -> None:
                 return
 
 
+def hoehen7() -> None:
+    """LGL-Durchsatz: 4 Kacheln nacheinander, dann 4, 8 und 16 gleichzeitig (Stuttgart)."""
+    from concurrent.futures import ThreadPoolExecutor
+    namen = [f"dgm1_32_{e}_{n}_2_bw.zip" for n in range(5400, 5440, 2) for e in range(505, 525, 2)]
+    def lade(name):
+        anfrage = urllib.request.Request(f"https://opengeodata.lgl-bw.de/data/dgm/{name}", headers=AGENT)
+        t = time.time()
+        with urllib.request.urlopen(anfrage, timeout=600) as a:
+            n = len(a.read())
+        return n, time.time() - t
+    i = 0
+    for parallel in (1, 4, 8, 16):
+        teil = namen[i:i + max(4, parallel)]
+        i += len(teil)
+        t = time.time()
+        with ThreadPoolExecutor(parallel) as pool:
+            erg = list(pool.map(lade, teil))
+        dauer = time.time() - t
+        mb = sum(n for n, _ in erg) / 1e6
+        print(f"{parallel:2d} gleichzeitig: {len(teil)} Kacheln, {mb:.0f} MB in {dauer:.0f} s = {mb / dauer:.2f} MB/s gesamt, "
+              f"je Kachel {min(d for _, d in erg):.0f}–{max(d for _, d in erg):.0f} s")
+
+
 def main() -> None:
     import sys
+    if "hoehen7" in sys.argv[1:]:
+        hoehen7()
+        return
     if "hoehen6" in sys.argv[1:]:
         hoehen6()
         return
