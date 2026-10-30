@@ -67,6 +67,13 @@ jobs:
           else
             python kachel.py --kachel "$KACHEL" --ausgabe "../daten/mondschein-hoehen-$KACHEL.bin" \
               --arbeitsordner ../arbeit --cache ../copernicus --quellen "${QUELLEN:-bev,bayern,schweiz,bw,elsass,niederlande,niedersachsen}"
+            # Vergleich mit der veröffentlichten Fassung (nur Ausgabe)
+            alt=$(curl -fsSL "https://github.com/lh1000/Mondschein-Daten/releases/latest/download/daten.json?t=$(date +%s)" | python3 -c "
+          import json, sys
+          print(next((d['url'] for d in json.load(sys.stdin)['dateien'] if d['name'] == 'mondschein-hoehen-$KACHEL.bin'), ''))" || true)
+            if [ -n "$alt" ]; then curl -fsSL -o ../alt.bin "$alt" || true; fi
+            python vergleich.py "../daten/mondschein-hoehen-$KACHEL.bin" ../alt.bin || true
+            rm -f ../alt.bin
           fi
           ls -la ../daten
       - uses: actions/upload-artifact@v4
