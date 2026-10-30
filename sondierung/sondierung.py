@@ -231,8 +231,31 @@ def hoehen4() -> None:
         print(f"     {d.width}×{d.height}, dtype {d.dtypes[0]}, nodata {d.nodata}, crs {d.crs}, Übersichten {d.overviews(1)}, Blöcke {d.block_shapes}")
 
 
+def hoehen5() -> None:
+    """Vierte Runde: Eintrag DGM1 der LGL-Produktliste vollständig, eine Kachel versuchen."""
+    text = pruefe("LGL Produkte", "https://opengeodata.lgl-bw.de/assets/config/local/odp-products.json", 4 << 20).decode("utf-8")
+    produkte = json.loads(text)
+    def finde(x):
+        if isinstance(x, dict):
+            if x.get("uuid") == "dgm1":
+                return x
+            for v in x.values():
+                r = finde(v)
+                if r:
+                    return r
+        if isinstance(x, list):
+            for v in x:
+                r = finde(v)
+                if r:
+                    return r
+    print(json.dumps(finde(produkte), indent=1, ensure_ascii=False)[:6000])
+
+
 def main() -> None:
     import sys
+    if "hoehen5" in sys.argv[1:]:
+        hoehen5()
+        return
     if "hoehen4" in sys.argv[1:]:
         hoehen4()
         return
