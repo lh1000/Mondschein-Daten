@@ -590,7 +590,22 @@ AHN_AUFLOESUNG = 5  # m (der Dienst mittelt das 0,5-m-Modell herunter)
 def lies_ahn(aufgabe: tuple[int, int]) -> tuple[np.ndarray, Affine]:
     x0, y0 = aufgabe
     n = AHN_BLOCK // AHN_AUFLOESUNG
-    daten = lade_url(AHN_WCS.format(x0=x0, x1=x0 + AHN_BLOCK, y0=y0, y1=y0 + AHN_BLOCK, n=n))
+    url = AHN_WCS.format(x0=x0, x1=x0 + AHN_BLOCK, y0=y0, y1=y0 + AHN_BLOCK, n=n)
+    daten = None
+    for versuch in range(6):
+        try:
+            with urllib.request.urlopen(url, timeout=120) as antwort:
+                daten = antwort.read()
+            break
+        except urllib.error.HTTPError as fehler:
+            if 400 <= fehler.code < 500:
+                # Block außerhalb der Ausdehnung des Modells: der Dienst antwortet mit einem Fehler statt Lücken
+                return np.full((1, 1), QUELL_LUECKE, np.float32), Affine(AHN_BLOCK, 0, x0, 0, -AHN_BLOCK, y0 + AHN_BLOCK)
+            time.sleep(3 * (versuch + 1))
+        except (OSError, urllib.error.URLError):
+            time.sleep(3 * (versuch + 1))
+    if daten is None:
+        raise RuntimeError(f"{url} ließ sich nicht laden")
     with MemoryFile(daten) as speicher, speicher.open() as d:
         a = d.read(1).astype(np.float32)
         t = d.transform
@@ -602,8 +617,8 @@ def lies_ahn(aufgabe: tuple[int, int]) -> tuple[np.ndarray, Affine]:
 def niederlande(summen: Summen, parallel: int = 6) -> None:
     """AHN4 DTM (Actueel Hoogtebestand Nederland, CC0) über den WCS von PDOK, 5-km-Blöcke mit 5 m."""
     x0, y0, x1, y1 = transform_bounds(ETRS89, RD, *summen.gitter.grenzen(), densify_pts=51)
-    # Gebiet der Niederlande in RD (ca. 0–300 km Ost, 300–625 km Nord)
-    x0, y0, x1, y1 = max(x0, 0), max(y0, 300_000), min(x1, 300_000), min(y1, 625_000)
+    # Ausdehnung von AHN in RD (ca. 10–280 km Ost, 305–620 km Nord)
+    x0, y0, x1, y1 = max(x0, 10_000), max(y0, 305_000), min(x1, 280_000), min(y1, 620_000)
     if x0 >= x1 or y0 >= y1:
         print("  Niederlande: außerhalb der Kachel")
         return
