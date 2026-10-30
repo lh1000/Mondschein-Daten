@@ -1,0 +1,79 @@
+# Übersichtskarte aller Gebiete (Mondschein, Meilenstein 39): grober Protomaps-Ausschnitt (Zoom 0–8) über das
+# Rechteck um alle Gesamtgebiete, damit nicht geladene Gebiete auf der Karte nicht leer bleiben. Grunddatei:
+# Die App lädt sie immer. Nur auf Knopfdruck.
+name: Übersichtskarte aufbereiten
+
+on:
+  workflow_dispatch:
+    inputs:
+      maxzoom:
+        description: "Höchste Zoomstufe (8 ≈ 15–30 MB)"
+        default: "8"
+      veroeffentlichen:
+        description: "Als Datenstand veröffentlichen (sonst nur als Artefakt)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  uebersicht:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MAXZOOM: ${{ inputs.maxzoom }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Ausschnitt aus dem Protomaps-Build
+        run: |
+          [[ "$MAXZOOM" =~ ^[0-9]+$ ]] && [ "$MAXZOOM" -le 10 ] || { echo "maxzoom 0–10 erwartet"; exit 1; }
+          gh release download --repo protomaps/go-pmtiles --pattern '*_Linux_x86_64.tar.gz' --output pmtiles.tar.gz
+          tar xzf pmtiles.tar.gz pmtiles
+          build=$(curl -fsSL https://build-metadata.protomaps.dev/builds.json | grep -oE '[0-9]{8}\.pmtiles' | sort | tail -1)
+          # Rechteck um alle Gesamtgebiete plus 0,3° Rand
+          gebiet=$(python3 - <<'PY'
+          import json
+          g = json.load(open("gebiete/gebiete.json", encoding="utf-8"))["gesamt"]
+          g = g if isinstance(g, list) else [g]
+          r = 0.3
+          print(f"{min(x['west'] for x in g) - r:.2f},{min(x['sued'] for x in g) - r:.2f},"
+                f"{max(x['ost'] for x in g) + r:.2f},{max(x['nord'] for x in g) + r:.2f}")
+          PY
+          )
+          echo "Build $build, Gebiet $gebiet, Zoom 0–$MAXZOOM"
+          mkdir -p daten
+          ./pmtiles extract "https://build.protomaps.com/$build" daten/mondschein-uebersicht.pmtiles --bbox="$gebiet" --maxzoom="$MAXZOOM"
+          ls -la daten
+          ./pmtiles show daten/mondschein-uebersicht.pmtiles | head -30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uebersicht
+          path: daten/*.pmtiles
+          retention-days: 5
+          compression-level: 0
+
+  veroeffentlichen:
+    needs: uebersicht
+    if: ${{ inputs.veroeffentlichen }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: daten
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: uebersicht
+          path: daten
+      - name: Veröffentlichen
+        run: |
+          ls -la daten
+          python3 wege/veroeffentlichen.py --daten daten --stand "$(date -u +%F)"

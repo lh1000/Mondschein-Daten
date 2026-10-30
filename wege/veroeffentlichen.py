@@ -41,6 +41,8 @@ DATEIEN = {
     "mondschein-wege.bin": "Wegenetz (OpenStreetMap)",
     "mondschein-wald.bin": "Wald am Weg (Meta/WRI CHMv2, Copernicus)",
 }
+# Grunddaten: gehören zu keinem Gebiet, die App lädt sie immer (Übersichtskarte, Meilenstein 39)
+GRUNDDATEIEN = {"mondschein-uebersicht.pmtiles": "Übersichtskarte aller Gebiete (OpenStreetMap, Protomaps)"}
 # Ladbare Gebiete (Gebietserweiterung, docs/konzept.md Stufe 5): Die Dateien oben gehören zum Kerngebiet.
 # Regionsdateien heißen mondschein-<art>-<region>.<endung>, Höhenkacheln mondschein-hoehen-N47E010.bin
 # (gehören zu allen Regionen außer „kern“, die die Kachel berühren), die Horizontpuffer
@@ -85,6 +87,8 @@ def zuordnung(name: str, alle: list[dict]) -> tuple[str, list[str]] | None:
     """Beschreibung und Regionen einer Datei; `None`, wenn sie nicht zu den Daten der App gehört."""
     if name in DATEIEN:
         return DATEIEN[name], ["kern"]
+    if name in GRUNDDATEIEN:
+        return GRUNDDATEIEN[name], []
     m = REGIONSDATEI.fullmatch(name)
     if not m:
         return None
