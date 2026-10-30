@@ -84,8 +84,48 @@ def dwd() -> None:
         print(pruefe(f"DWD {datei}", f"https://opendata.dwd.de/{datei}", 1 << 16).decode("utf-8", "replace")[:3000])
 
 
+def dwd2() -> None:
+    """Neuer DWD-Pfad (v1): Dateinamen bis hinunter, eine CLC- und eine HHL-Datei laden und ihr Gitter zeigen."""
+    import bz2
+    v1 = "https://opendata.dwd.de/weather/nwp/v1/m/icon-d2/p/"
+    def tiefer(pfad: str, schritte: int = 12) -> str | None:
+        for _ in range(schritte):
+            liste = verzeichnis(f"DWD {pfad[37:]}", pfad, 8)
+            dateien = re.findall(r'href="([^"/]+\.grib2(?:\.bz2)?)"', liste)
+            if dateien:
+                return pfad + dateien[0]
+            unter = re.findall(r'href="([^"./][^"]*/)"', liste)
+            if not unter:
+                return None
+            pfad += unter[-1] if "r/" in pfad[-3:] or "%3A" in unter[-1] else unter[0]
+        return None
+    for param in ("CLC", "HHL", "CLAT", "CLON"):
+        url = tiefer(v1 + param + "/")
+        print(f"     → {param}: {url}")
+        if not url:
+            continue
+        daten = pruefe(f"DWD {param} Datei", url, 64 << 20)
+        if url.endswith(".bz2"):
+            daten = bz2.decompress(daten)
+        try:
+            import eccodes
+            g = eccodes.codes_new_from_message(daten)
+            for k in ("gridType", "numberOfDataPoints", "Ni", "Nj", "typeOfLevel", "level", "shortName", "numberOfGridUsed", "uuidOfHGrid",
+                      "latitudeOfFirstGridPointInDegrees", "longitudeOfFirstGridPointInDegrees", "iDirectionIncrementInDegrees"):
+                try:
+                    print(f"       {k} = {eccodes.codes_get(g, k)}")
+                except Exception as fehler:  # noqa: BLE001
+                    print(f"       {k}: {fehler}")
+            eccodes.codes_release(g)
+        except Exception as fehler:  # noqa: BLE001
+            print(f"     eccodes: {fehler}")
+
+
 def main() -> None:
     import sys
+    if "dwd2" in sys.argv[1:]:
+        dwd2()
+        return
     if "dwd" in sys.argv[1:]:
         dwd()
         return
