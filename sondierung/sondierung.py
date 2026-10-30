@@ -7,6 +7,7 @@ Aufbereitungsläufe nicht an einer Sperre oder Drosselung scheitern. Ändert nic
 import json
 import re
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -121,8 +122,59 @@ def dwd2() -> None:
             print(f"     eccodes: {fehler}")
 
 
+def links(name: str, url: str, muster: str = "", zeilen: int = 40) -> str:
+    """Seite holen und Verweise (href/src/url-artige Zeichenketten) ausgeben, die [muster] enthalten."""
+    text = pruefe(name, url, 4 << 20).decode("utf-8", "replace")
+    gefunden = sorted(set(re.findall(r'(?:href|src)="([^"]+)"', text) + re.findall(r'https?://[^\s"<>\']+', text)))
+    treffer = [g for g in gefunden if muster.lower() in g.lower()]
+    for g in treffer[:zeilen]:
+        print(f"     {g}")
+    if len(treffer) > zeilen:
+        print(f"     … {len(treffer) - zeilen} weitere")
+    if not treffer:
+        print("     (keine Verweise) Anfang: " + re.sub(r"\s+", " ", text[:600]))
+    return text
+
+
+def hoehen2() -> None:
+    """Amtliche Höhenquellen für Meilenstein 40: Baden-Württemberg, Elsass, Niederlande, Niedersachsen."""
+    print("--- LGL Baden-Württemberg")
+    links("LGL Startseite", "https://opengeodata.lgl-bw.de/", "")
+    for pfad in ("data/", "data/dgm/", "data/dgm1/"):
+        links(f"LGL {pfad}", f"https://opengeodata.lgl-bw.de/{pfad}", "", 15)
+    links("LGL WCS DGM1", "https://owsproxy.lgl-bw.de/owsproxy/ows/WCS_INSP_BW_Hoehe_Coverage_DGM1?SERVICE=WCS&REQUEST=GetCapabilities", "", 10)
+    print("--- IGN Géoplateforme")
+    cap = pruefe("IGN WMS-R Capabilities", "https://data.geopf.fr/wms-r?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0", 30 << 20).decode("utf-8", "replace")
+    print("     Formate: " + ", ".join(sorted(set(re.findall(r"<Format>([^<]+)</Format>", cap)))[:30]))
+    for n in sorted(set(re.findall(r"<Name>([^<]*(?:ELEVATION|MNT|ALTI)[^<]*)</Name>", cap)))[:40]:
+        print(f"     Ebene {n}")
+    for fmt in ("image/geotiff", "image/x-bil;bits=32"):
+        url = ("https://data.geopf.fr/wms-r?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES"
+               f"&STYLES=&CRS=EPSG:4326&BBOX=48.0,7.3,48.01,7.31&WIDTH=100&HEIGHT=100&FORMAT={urllib.parse.quote(fmt)}")
+        d = pruefe(f"IGN GetMap {fmt}", url, 1 << 20)
+        print(f"     Anfang {d[:16]!r}, {len(d)} Byte")
+    links("IGN Téléchargement LiDAR HD MNT", "https://data.geopf.fr/telechargement/resource/LIDARHD-MNT", "", 10)
+    print("--- PDOK AHN")
+    cap = pruefe("PDOK AHN WCS Capabilities", "https://service.pdok.nl/rws/ahn/wcs/v1_0?SERVICE=WCS&REQUEST=GetCapabilities&VERSION=2.0.1", 4 << 20).decode("utf-8", "replace")
+    print("     Coverages: " + ", ".join(sorted(set(re.findall(r"CoverageId>([^<]+)<", cap)))))
+    print("     Formate: " + ", ".join(sorted(set(re.findall(r"formatSupported>([^<]+)<", cap)))))
+    url = ("https://service.pdok.nl/rws/ahn/wcs/v1_0?SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCoverage&COVERAGEID=dtm_05m"
+           "&FORMAT=image/tiff&SUBSET=x(120000,120500)&SUBSET=y(487000,487500)")
+    d = pruefe("PDOK GetCoverage dtm_05m 500 m", url, 8 << 20)
+    print(f"     Anfang {d[:8]!r}, {len(d)} Byte")
+    links("PDOK Atom dtm_05m", "https://service.pdok.nl/rws/ahn/atom/dtm_05m.xml", ".tif", 5)
+    print("--- LGLN Niedersachsen")
+    links("LGLN OpenGeoData", "https://opengeodata.lgln.niedersachsen.de/", "", 40)
+    for u in ("https://dgm.stac.lgln.niedersachsen.de/", "https://stac.lgln.niedersachsen.de/", "https://opengeodata.lgln.niedersachsen.de/stac/"):
+        links(f"LGLN STAC? {u}", u, "", 15)
+    links("LGLN Hub", "https://ni-lgln-opengeodata.hub.arcgis.com/", "dgm", 20)
+
+
 def main() -> None:
     import sys
+    if "hoehen2" in sys.argv[1:]:
+        hoehen2()
+        return
     if "vergleich" in sys.argv[1:]:
         import subprocess
         subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "dwd_vergleich.py")], check=True)
