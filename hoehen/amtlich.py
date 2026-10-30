@@ -32,6 +32,8 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+import rasterio.errors
+import rasterio.transform
 import rasterio.warp
 from affine import Affine
 from numpy.lib.format import open_memmap
@@ -390,6 +392,287 @@ def schweiz(summen: Summen, parallel: int = 8) -> None:
             summen.sichern()
             fertig = start + len(teil)
             if fertig % 400 < 8 * parallel or fertig == len(offen):
+                print(f"    {fertig}/{len(offen)} Kacheln, {(time.time() - zeit) / 60:.0f} min")
+
+
+# ---------------------------------------------------------------- Baden-Württemberg (LGL DGM1)
+
+BW_URL = "https://opengeodata.lgl-bw.de/data/dgm/dgm1_32_{e}_{n}_2_bw.zip"
+BW_GEBIET = (7.4, 47.5, 10.55, 49.85)  # West, Süd, Ost, Nord in Grad (Landesgrenze plus Rand)
+
+
+def bw_kacheln(gitter: Gitter) -> list[tuple[int, int]]:
+    """2-km-Kacheln (Ostwert ungerade, Nordwert gerade in km, EPSG:25832), die Gitter und Land berühren."""
+    gw, gs, go, gn = gitter.grenzen()
+    w, s, o, n = max(gw, BW_GEBIET[0]), max(gs, BW_GEBIET[1]), min(go, BW_GEBIET[2]), min(gn, BW_GEBIET[3])
+    if w >= o or s >= n:
+        return []
+    x0, y0, x1, y1 = transform_bounds(ETRS89, UTM32, w, s, o, n, densify_pts=51)
+    e0 = int(x0 // 1000) - 1
+    e0 -= (e0 + 1) % 2  # ungerade
+    n0 = int(y0 // 1000) - 2
+    n0 -= n0 % 2  # gerade
+    return [(e, nn) for nn in range(n0, int(y1 // 1000) + 1, 2) for e in range(e0, int(x1 // 1000) + 1, 2)]
+
+
+def lies_bw(aufgabe: tuple[int, int, int]) -> list[tuple[np.ndarray, Affine]] | None:
+    """Eine 2-km-Kachel (ZIP mit vier 1-km-XYZ-Dateien, 1 m), je km auf [faktor] m gemittelt; `None`, wenn
+    es sie nicht gibt (außerhalb des Landes)."""
+    import io
+    import zipfile
+    e, n, faktor = aufgabe
+    url = BW_URL.format(e=e, n=n)
+    daten = None
+    for versuch in range(8):
+        try:
+            with urllib.request.urlopen(url, timeout=180) as antwort:
+                daten = antwort.read()
+            break
+        except urllib.error.HTTPError as fehler:
+            if fehler.code == 404:
+                return None
+            time.sleep(min(60, 5 * (versuch + 1)))
+        except (OSError, urllib.error.URLError):
+            time.sleep(min(60, 5 * (versuch + 1)))
+    if daten is None:
+        raise RuntimeError(f"{url} ließ sich nicht laden")
+    teile = []
+    with zipfile.ZipFile(io.BytesIO(daten)) as z:
+        for name in z.namelist():
+            if not name.endswith(".xyz"):
+                continue
+            # Textmodus von fromstring parst in C (np.array(text.split()) wäre ca. 10-mal langsamer)
+            werte = np.fromstring(z.read(name).decode("ascii"), dtype=np.float64, sep=" ").reshape(-1, 3)
+            x0 = math.floor(werte[:, 0].min())
+            y1 = math.ceil(werte[:, 1].max())
+            spalten = math.ceil(werte[:, 0].max()) - x0
+            zeilen = y1 - math.floor(werte[:, 1].min())
+            raster = np.full((zeilen, spalten), np.nan, np.float32)
+            raster[(y1 - werte[:, 1]).astype(np.int64), (werte[:, 0] - x0).astype(np.int64)] = werte[:, 2]
+            # Auf faktor × faktor m mitteln (weniger Punkte zum Aufaddieren, Zielzellen 7–30 m)
+            zh, sh = zeilen // faktor, spalten // faktor
+            bloecke = raster[:zh * faktor, :sh * faktor].reshape(zh, faktor, sh, faktor)
+            with np.errstate(invalid="ignore"):
+                mittel = np.nanmean(bloecke, axis=(1, 3)) if np.isnan(bloecke).any() else bloecke.mean(axis=(1, 3))
+            mittel[~np.isfinite(mittel)] = QUELL_LUECKE
+            teile.append((mittel.astype(np.float32), Affine(faktor, 0, x0, 0, -faktor, y1)))
+    return teile
+
+
+def baden_wuerttemberg(summen: Summen, aufloesung: int = 5, parallel: int = 12) -> None:
+    """LGL DGM1 (Baden-Württemberg, dl-de/by-2-0): 2-km-Kacheln als ZIP mit XYZ-Text (ca. 13 MB).
+
+    Der Server liefert je Verbindung nur ca. 1 MB/s; deshalb viele Verbindungen parallel. Kacheln außerhalb des
+    Landes gibt es nicht (404) und werden übersprungen.
+    """
+    kacheln = bw_kacheln(summen.gitter)
+    offen = [k for k in kacheln if f"bw:{k[0]}:{k[1]}" not in summen.erledigt]
+    print(f"  Baden-Württemberg: {len(kacheln)} mögliche Kacheln, offen {len(offen)}, gemittelt auf {aufloesung} m")
+    zeit, vorhanden = time.time(), 0
+    with ThreadPoolExecutor(parallel) as pool:
+        for start in range(0, len(offen), 4 * parallel):
+            teil = offen[start:start + 4 * parallel]
+            for (e, n), ergebnis in zip(teil, pool.map(lies_bw, [(e, n, aufloesung) for e, n in teil])):
+                for a, t in ergebnis or []:
+                    summen.addiere(a, t, UTM32)
+                vorhanden += ergebnis is not None
+                summen.fertig(f"bw:{e}:{n}")
+            summen.sichern()
+            fertig = start + len(teil)
+            if fertig % 240 < 4 * parallel or fertig == len(offen):
+                dauer = time.time() - zeit
+                print(f"    {fertig}/{len(offen)} Kacheln ({vorhanden} im Land), {dauer / 60:.0f} min, "
+                      f"noch ca. {dauer / fertig * (len(offen) - fertig) / 60:.0f} min")
+
+
+# ---------------------------------------------------------------- Elsass (IGN RGE ALTI)
+
+IGN_WMS = ("https://data.geopf.fr/wms-r?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap"
+           "&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES&STYLES=&CRS=EPSG:4326"
+           "&BBOX={sued},{west},{nord},{ost}&WIDTH={breite}&HEIGHT={hoehe}&FORMAT=image/geotiff")
+IGN_BLOCK = 4096  # Pixel je Kante und Abruf (der Dienst liefert bis 4096², ca. 9 MB/s)
+ELSASS_POLY = "https://download.geofabrik.de/europe/france/alsace.poly"
+WGS84 = CRS.from_epsg(4326)
+
+
+def poly_ringe(text: str) -> list[list[tuple[float, float]]]:
+    """Äußere Ringe einer Osmosis-.poly-Datei (Länge, Breite); Löcher (Name mit „!“) entfallen."""
+    ringe, ring, aussen = [], None, True
+    for zeile in text.splitlines()[1:]:
+        zeile = zeile.strip()
+        if not zeile:
+            continue
+        if ring is None:
+            if zeile == "END":
+                break
+            ring, aussen = [], not zeile.startswith("!")
+        elif zeile == "END":
+            if aussen and len(ring) >= 3:
+                ringe.append(ring)
+            ring = None
+        else:
+            l, b = zeile.split()[:2]
+            ring.append((float(l), float(b)))
+    return ringe
+
+
+def ausschnitt_maske(ringe: list[list[tuple[float, float]]], form: tuple[int, int], transform: Affine) -> np.ndarray:
+    """True für Pixel, deren Mitte in einem der Ringe liegt (Grad, gleiche Abbildung wie das Raster)."""
+    from rasterio.features import rasterize
+    formen = [({"type": "Polygon", "coordinates": [r]}, 1) for r in ringe]
+    return rasterize(formen, out_shape=form, transform=transform, fill=0, dtype="uint8").astype(bool)
+
+
+def lies_ign(aufgabe: tuple[float, float, float, float, int, int]) -> tuple[np.ndarray, Affine]:
+    west, sued, ost, nord, breite, hoehe = aufgabe
+    url = IGN_WMS.format(west=west, sued=sued, ost=ost, nord=nord, breite=breite, hoehe=hoehe)
+    daten = lade_url(url)
+    with MemoryFile(daten) as speicher, speicher.open() as d:
+        a = d.read(1).astype(np.float32)
+        luecke = d.nodata
+    if a.shape != (hoehe, breite):
+        raise RuntimeError(f"IGN: {a.shape} statt {(hoehe, breite)}")
+    a[~np.isfinite(a) | (a < -1000) | ((a == luecke) if luecke is not None else False)] = QUELL_LUECKE
+    # Abbildung aus der angefragten Box (die Datei nennt eine „unknown“-Abbildung mit Breite zuerst)
+    return a, rasterio.transform.from_bounds(west, sued, ost, nord, breite, hoehe)
+
+
+def elsass(summen: Summen, proben: int = 2, parallel: int = 4) -> None:
+    """IGN RGE ALTI (1–5 m, Etalab 2.0) über den WMS der Géoplateforme, nur im Elsass.
+
+    Der Dienst liefert auch jenseits der Grenze Werte (andere Quellen); deshalb zählt nur, was im Umriss
+    des Elsass (Geofabrik, ca. 1 km Rand) liegt. Je Zielzelle [proben]² Abtastpunkte.
+    """
+    ringe = poly_ringe(lade_url(ELSASS_POLY).decode("utf-8"))
+    ew = min(l for r in ringe for l, _ in r)
+    eo = max(l for r in ringe for l, _ in r)
+    es = min(b for r in ringe for _, b in r)
+    en = max(b for r in ringe for _, b in r)
+    gw, gs, go, gn = summen.gitter.grenzen()
+    w, s, o, n = max(gw, ew), max(gs, es), min(go, eo), min(gn, en)
+    if w >= o or s >= n:
+        print("  Elsass: außerhalb der Kachel")
+        return
+    schritt = summen.gitter.grad / proben
+    kante = IGN_BLOCK * schritt
+    aufgaben = []
+    for b0 in np.arange(s, n, kante):
+        for l0 in np.arange(w, o, kante):
+            b1, l1 = min(b0 + kante, n), min(l0 + kante, o)
+            box = (float(l0), float(b0), float(l1), float(b1), max(1, round((l1 - l0) / schritt)), max(1, round((b1 - b0) / schritt)))
+            # Blöcke ganz außerhalb des Umrisses auslassen (Prüfung auf grobem Raster)
+            grob = ausschnitt_maske(ringe, (32, 32), rasterio.transform.from_bounds(l0, b0, l1, b1, 32, 32))
+            if grob.any():
+                aufgaben.append((f"ign:{l0:.4f}:{b0:.4f}", box))
+    offen = [(k, a) for k, a in aufgaben if k not in summen.erledigt]
+    print(f"  Elsass (IGN): {len(aufgaben)} Blöcke, offen {len(offen)}")
+    zeit = time.time()
+    with ThreadPoolExecutor(parallel) as pool:
+        for start in range(0, len(offen), parallel):
+            teil = offen[start:start + parallel]
+            for (schluessel, box), (a, t) in zip(teil, pool.map(lies_ign, [b for _, b in teil])):
+                a[~ausschnitt_maske(ringe, a.shape, t)] = QUELL_LUECKE
+                summen.addiere(a, t, WGS84)
+                summen.fertig(schluessel)
+            summen.sichern()
+            print(f"    {start + len(teil)}/{len(offen)} Blöcke, {(time.time() - zeit) / 60:.0f} min")
+
+
+# ---------------------------------------------------------------- Niederlande (AHN, PDOK)
+
+RD = CRS.from_epsg(28992)
+AHN_WCS = ("https://service.pdok.nl/rws/ahn/wcs/v1_0?SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCoverage&COVERAGEID=dtm_05m"
+           "&FORMAT=image/tiff&SUBSET=x({x0},{x1})&SUBSET=y({y0},{y1})&SCALESIZE=x({n}),y({n})")
+AHN_BLOCK = 5000  # m je Abruf
+AHN_AUFLOESUNG = 5  # m (der Dienst mittelt das 0,5-m-Modell herunter)
+
+
+def lies_ahn(aufgabe: tuple[int, int]) -> tuple[np.ndarray, Affine]:
+    x0, y0 = aufgabe
+    n = AHN_BLOCK // AHN_AUFLOESUNG
+    daten = lade_url(AHN_WCS.format(x0=x0, x1=x0 + AHN_BLOCK, y0=y0, y1=y0 + AHN_BLOCK, n=n))
+    with MemoryFile(daten) as speicher, speicher.open() as d:
+        a = d.read(1).astype(np.float32)
+        t = d.transform
+    # Lücken (Gebäude, Wasser, außerhalb der Niederlande): größter float32-Wert
+    a[~np.isfinite(a) | (a > 1e30) | (a < -1000)] = QUELL_LUECKE
+    return a, t
+
+
+def niederlande(summen: Summen, parallel: int = 6) -> None:
+    """AHN4 DTM (Actueel Hoogtebestand Nederland, CC0) über den WCS von PDOK, 5-km-Blöcke mit 5 m."""
+    x0, y0, x1, y1 = transform_bounds(ETRS89, RD, *summen.gitter.grenzen(), densify_pts=51)
+    # Gebiet der Niederlande in RD (ca. 0–300 km Ost, 300–625 km Nord)
+    x0, y0, x1, y1 = max(x0, 0), max(y0, 300_000), min(x1, 300_000), min(y1, 625_000)
+    if x0 >= x1 or y0 >= y1:
+        print("  Niederlande: außerhalb der Kachel")
+        return
+    aufgaben = [(int(x), int(y)) for y in range(int(y0 // AHN_BLOCK) * AHN_BLOCK, int(y1), AHN_BLOCK)
+                for x in range(int(x0 // AHN_BLOCK) * AHN_BLOCK, int(x1), AHN_BLOCK)]
+    offen = [a for a in aufgaben if f"ahn:{a[0]}:{a[1]}" not in summen.erledigt]
+    print(f"  Niederlande (AHN): {len(aufgaben)} Blöcke, offen {len(offen)}")
+    zeit = time.time()
+    with ThreadPoolExecutor(parallel) as pool:
+        for start in range(0, len(offen), 4 * parallel):
+            teil = offen[start:start + 4 * parallel]
+            for (x, y), (a, t) in zip(teil, pool.map(lies_ahn, teil)):
+                summen.addiere(a, t, RD)
+                summen.fertig(f"ahn:{x}:{y}")
+            summen.sichern()
+            print(f"    {start + len(teil)}/{len(offen)} Blöcke, {(time.time() - zeit) / 60:.0f} min")
+
+
+# ---------------------------------------------------------------- Niedersachsen (LGLN DGM1)
+
+NI_STAC = "https://dgm.stac.lgln.niedersachsen.de/search"
+
+
+def niedersachsen_kacheln(gitter: Gitter) -> list[str]:
+    """Adressen der 1-km-Kacheln (COG) im Gebiet aus dem STAC-Katalog des LGLN."""
+    w, s, o, n = gitter.grenzen()
+    url = f"{NI_STAC}?collections=dgm1&bbox={w},{s},{o},{n}&limit=500"
+    adressen: set[str] = set()
+    while url:
+        seite = json.loads(lade_url(url))
+        for f in seite["features"]:
+            href = next((a["href"] for a in f["assets"].values() if a["href"].endswith(".tif")), None)
+            if href:
+                adressen.add(href)
+        url = next((l["href"] for l in seite.get("links", []) if l.get("rel") == "next"), None)
+    return sorted(adressen)
+
+
+def lies_cog(aufgabe: tuple[str, float]) -> tuple[np.ndarray, Affine, CRS]:
+    """Ganze COG-Kachel in der Auflösung [aufloesung] m (GDAL nimmt die passende Übersichtsstufe)."""
+    url, aufloesung = aufgabe
+    for versuch in range(6):
+        try:
+            with rasterio.Env(**GDAL_OPTIONEN), rasterio.open(f"/vsicurl/{url}") as d:
+                form = (max(1, round(d.height * d.res[1] / aufloesung)), max(1, round(d.width * d.res[0] / aufloesung)))
+                a = d.read(1, out_shape=form, resampling=Resampling.average, masked=True)
+                t = d.transform * Affine.scale(d.width / form[1], d.height / form[0])
+                return np.ma.filled(a.astype(np.float32), QUELL_LUECKE), t, d.crs or UTM32
+        except rasterio.errors.RasterioIOError:
+            time.sleep(3 * (versuch + 1))
+    raise RuntimeError(f"{url} ließ sich nicht lesen")
+
+
+def niedersachsen(summen: Summen, aufloesung: float = 5, parallel: int = 8) -> None:
+    """DGM1 Niedersachsen (LGLN, dl-de/by-2-0) aus dem STAC-Katalog, gelesen mit [aufloesung] m."""
+    urls = niedersachsen_kacheln(summen.gitter)
+    offen = [u for u in urls if u not in summen.erledigt]
+    print(f"  Niedersachsen: {len(urls)} Kacheln im Gebiet, offen {len(offen)}")
+    zeit = time.time()
+    with ThreadPoolExecutor(parallel) as pool:
+        for start in range(0, len(offen), 8 * parallel):
+            teil = offen[start:start + 8 * parallel]
+            for url, (a, t, crs) in zip(teil, pool.map(lies_cog, [(u, aufloesung) for u in teil])):
+                a[(a < -1000) | ~np.isfinite(a)] = QUELL_LUECKE
+                summen.addiere(a, t, crs)
+                summen.fertig(url)
+            summen.sichern()
+            fertig = start + len(teil)
+            if fertig % 800 < 8 * parallel or fertig == len(offen):
                 print(f"    {fertig}/{len(offen)} Kacheln, {(time.time() - zeit) / 60:.0f} min")
 
 

@@ -4,9 +4,10 @@ Schreibt `mondschein-hoehen-N47E010.bin` im Format der Höhendatei (README.md) m
 
 - südlich von 48° N (Alpen und Voralpen) 1/3″ (ca. 10 m × 7 m), nördlich 1″ (Hügelland, Entscheidung
   des Nutzers vom 28.10.2026);
-- Mittelwert der amtlichen Laserscan-Modelle wie im Kerngebiet: BEV ALS DTM (Österreich), Bayern DGM1
-  und swissALTI3D (Schweiz, Liechtenstein; amtlich.py); was keine dieser Quellen abdeckt (vorerst
-  Baden-Württemberg und Elsass), füllt Copernicus GLO-30;
+- Mittelwert der amtlichen Laserscan-Modelle wie im Kerngebiet: BEV ALS DTM (Österreich), Bayern DGM1,
+  swissALTI3D (Schweiz, Liechtenstein), seit Meilenstein 40 auch LGL DGM1 (Baden-Württemberg), IGN RGE ALTI
+  (Elsass), AHN4 (Niederlande) und LGLN DGM1 (Niedersachsen) (amtlich.py); was keine dieser Quellen
+  abdeckt (z. B. Rheinland-Pfalz, Hessen, Bremen, Tschechien), füllt Copernicus GLO-30;
 - die Kachel reicht von Grad- zu Gradlinie einschließlich beider Ränder, Nachbarkacheln überlappen also
   um eine Zelle (sonst fiele die App an den Nähten auf den groben Puffer zurück); begrenzt auf das
   Gesamtgebiet in tools/gebiete/gebiete.json.
@@ -64,7 +65,10 @@ def kachelgebiet(name: str, g: dict) -> tuple[hm.Gebiet, int]:
     return gebiet, 3 if breite < g["fein_bis"] else 1
 
 
-def kachel(name: str, ausgabe: Path, arbeitsordner: Path, cache: Path, quellen: set[str] = frozenset({"bev", "bayern", "schweiz"})) -> None:
+ALLE_QUELLEN = "bev,bayern,schweiz,bw,elsass,niederlande,niedersachsen"
+
+
+def kachel(name: str, ausgabe: Path, arbeitsordner: Path, cache: Path, quellen: set[str] = frozenset(ALLE_QUELLEN.split(","))) -> None:
     g = gebiete()
     gebiet, teilung = kachelgebiet(name, g)
     faktor = 10
@@ -79,6 +83,14 @@ def kachel(name: str, ausgabe: Path, arbeitsordner: Path, cache: Path, quellen: 
         amtlich.bayern(summen, arbeitsordner)
     if "schweiz" in quellen:
         amtlich.schweiz(summen)
+    if "bw" in quellen:
+        amtlich.baden_wuerttemberg(summen, aufloesung=2 if teilung == 3 else 5)
+    if "elsass" in quellen:
+        amtlich.elsass(summen, proben=2 if teilung == 1 else 1)
+    if "niederlande" in quellen:
+        amtlich.niederlande(summen)
+    if "niedersachsen" in quellen:
+        amtlich.niedersachsen(summen, aufloesung=2 if teilung == 3 else 5)
     hoehen = open_memmap(arbeitsordner / f"{name}_dm.npy", mode="w+", dtype=np.int16, shape=(gitter.zeilen, gitter.spalten))
     luecken = amtlich.mittelwert_in_bloecken(summen, hoehen, faktor)
     gesamt = gitter.zeilen * gitter.spalten
@@ -110,7 +122,7 @@ def main() -> int:
     p.add_argument("--ausgabe", type=Path, required=True)
     p.add_argument("--arbeitsordner", type=Path, default=Path("arbeit"))
     p.add_argument("--cache", type=Path, default=Path("copernicus"))
-    p.add_argument("--quellen", default="bev,bayern,schweiz", help="amtliche Quellen, z. B. bev,schweiz (Rest: Copernicus)")
+    p.add_argument("--quellen", default=ALLE_QUELLEN, help="amtliche Quellen, z. B. bev,schweiz (Rest: Copernicus)")
     a = p.parse_args()
     beginn = time.time()
     if a.puffer:

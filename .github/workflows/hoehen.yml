@@ -10,7 +10,7 @@ on:
         default: "puffer-sued N46E009 N46E010 N47E009 N47E010"
       quellen:
         description: "Amtliche Quellen (Rest Copernicus)"
-        default: "bev,bayern,schweiz"
+        default: "bev,bayern,schweiz,bw,elsass,niederlande,niedersachsen"
       veroeffentlichen:
         description: "Als Datenstand veröffentlichen (sonst nur als Artefakte)"
         type: boolean
@@ -66,7 +66,7 @@ jobs:
             python kachel.py --puffer "${KACHEL#puffer-}" --ausgabe "../daten/mondschein-hoehen-$KACHEL.bin" --cache ../copernicus
           else
             python kachel.py --kachel "$KACHEL" --ausgabe "../daten/mondschein-hoehen-$KACHEL.bin" \
-              --arbeitsordner ../arbeit --cache ../copernicus --quellen "${QUELLEN:-bev,bayern,schweiz}"
+              --arbeitsordner ../arbeit --cache ../copernicus --quellen "${QUELLEN:-bev,bayern,schweiz,bw,elsass,niederlande,niedersachsen}"
           fi
           ls -la ../daten
       - uses: actions/upload-artifact@v4
