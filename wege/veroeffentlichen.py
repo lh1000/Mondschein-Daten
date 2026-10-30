@@ -107,7 +107,7 @@ def zuordnung(name: str, alle: list[dict]) -> tuple[str, list[str]] | None:
             return None
         b, l = int(k[1]), int(k[2])
         zu = [r["id"] for r in weitere if r["sued"] < b + 1 and r["nord"] > b and r["west"] < l + 1 and r["ost"] > l]
-        return f"Höhen {teil} (BEV, Bayern, Copernicus)", zu
+        return f"Höhen {teil} (amtliche Laserscan-Modelle, Copernicus)", zu
     region = next((r for r in alle if r["id"] == teil), None)
     if region is None:
         return None

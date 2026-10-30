@@ -32,6 +32,12 @@ gemittelt bzw. maximiert, in Kacheln umgewandelt):
 - **Copernicus DEM GLO-30:** © DLR e.V. 2010–2014 und © Airbus Defence and Space GmbH 2014–2018, bereitgestellt
   im Rahmen von COPERNICUS durch die Europäische Union und die ESA.
 - **Höhendaten Schweiz und Liechtenstein:** swissALTI3D © swisstopo (Open Government Data), verändert (gemittelt).
+- **Höhendaten Baden-Württemberg:** Datenquelle LGL, [www.lgl-bw.de](https://www.lgl-bw.de), DGM1, Lizenz
+  [dl-de/by-2-0](https://www.govdata.de/dl-de/by-2-0), verändert (gemittelt und umprojiziert).
+- **Höhendaten Elsass:** IGN – RGE ALTI, [Licence Ouverte Etalab 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/), verändert (gemittelt).
+- **Höhendaten Niederlande:** AHN – Actueel Hoogtebestand Nederland (Rijkswaterstaat, Waterschappen), CC0, verändert (gemittelt).
+- **Höhendaten Niedersachsen:** © GeoBasis-DE / LGLN 2026, DGM1, Lizenz [dl-de/by-2-0](https://www.govdata.de/dl-de/by-2-0),
+  verändert (gemittelt und umprojiziert).
 - **Regionen der Gebietserweiterung** (`mondschein-<art>-<region>.*`, Höhenkacheln `mondschein-hoehen-N47E010.bin`):
   dieselben Quellen; Grundkarten als Protomaps-Ausschnitte, Wege und Wander-Ebene aus OpenStreetMap
   (Geofabrik-Extrakte, ODbL 1.0); wo keine amtlichen Höhendaten genutzt werden, Copernicus DEM GLO-30.
