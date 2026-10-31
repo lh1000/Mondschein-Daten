@@ -308,7 +308,7 @@ def lade_bytes(name: str, groesse: int) -> bytes | None:
     return None
 
 
-def bayern(summen: Summen, arbeitsordner: Path, parallel: int = 4) -> None:
+def bayern(summen: Summen, arbeitsordner: Path, parallel: int = 12) -> None:
     """DGM1-Kacheln parallel laden und nacheinander aufaddieren; nichts wird gespeichert."""
     kacheln = bayern_kacheln(arbeitsordner, summen.gitter)
     offen = [(n, g) for n, g in kacheln if n not in summen.erledigt]
@@ -415,6 +415,14 @@ def bw_kacheln(gitter: Gitter) -> list[tuple[int, int]]:
     return [(e, nn) for nn in range(n0, int(y1 // 1000) + 1, 2) for e in range(e0, int(x1 // 1000) + 1, 2)]
 
 
+def xyz_werte(text: bytes) -> np.ndarray:
+    """XYZ-Text (Leerzeichen, Zeilenende CRLF) als n × 3 float64; pandas liest in C ca. 10-mal schneller als numpy."""
+    import io
+    import pandas as pd
+    return pd.read_csv(io.BytesIO(text), sep=" ", header=None, names=("x", "y", "z"), dtype=np.float64,
+                       engine="c").to_numpy()
+
+
 def lies_bw(aufgabe: tuple[int, int, int]) -> list[tuple[np.ndarray, Affine]] | None:
     """Eine 2-km-Kachel (ZIP mit vier 1-km-XYZ-Dateien, 1 m), je km auf [faktor] m gemittelt; `None`, wenn
     es sie nicht gibt (außerhalb des Landes)."""
@@ -441,8 +449,7 @@ def lies_bw(aufgabe: tuple[int, int, int]) -> list[tuple[np.ndarray, Affine]] | 
         for name in z.namelist():
             if not name.endswith(".xyz"):
                 continue
-            # Textmodus von fromstring parst in C (np.array(text.split()) wäre ca. 10-mal langsamer)
-            werte = np.fromstring(z.read(name).decode("ascii"), dtype=np.float64, sep=" ").reshape(-1, 3)
+            werte = xyz_werte(z.read(name))
             x0 = math.floor(werte[:, 0].min())
             y1 = math.ceil(werte[:, 1].max())
             spalten = math.ceil(werte[:, 0].max()) - x0
@@ -459,7 +466,7 @@ def lies_bw(aufgabe: tuple[int, int, int]) -> list[tuple[np.ndarray, Affine]] | 
     return teile
 
 
-def baden_wuerttemberg(summen: Summen, aufloesung: int = 5, parallel: int = 12) -> None:
+def baden_wuerttemberg(summen: Summen, aufloesung: int = 5, parallel: int = 16) -> None:
     """LGL DGM1 (Baden-Württemberg, dl-de/by-2-0): 2-km-Kacheln als ZIP mit XYZ-Text (ca. 13 MB).
 
     Der Server liefert je Verbindung nur ca. 1 MB/s; deshalb viele Verbindungen parallel. Kacheln außerhalb des
@@ -469,7 +476,10 @@ def baden_wuerttemberg(summen: Summen, aufloesung: int = 5, parallel: int = 12) 
     offen = [k for k in kacheln if f"bw:{k[0]}:{k[1]}" not in summen.erledigt]
     print(f"  Baden-Württemberg: {len(kacheln)} mögliche Kacheln, offen {len(offen)}, gemittelt auf {aufloesung} m")
     zeit, vorhanden = time.time(), 0
-    with ThreadPoolExecutor(parallel) as pool:
+    # Eigene Prozesse: Entpacken und Einlesen des Texts brauchen die meiste Zeit (Threads liefen nacheinander);
+    # der Server liefert mit 16 Verbindungen ca. 17 MB/s
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor(parallel) as pool:
         for start in range(0, len(offen), 4 * parallel):
             teil = offen[start:start + 4 * parallel]
             for (e, n), ergebnis in zip(teil, pool.map(lies_bw, [(e, n, aufloesung) for e, n in teil])):
